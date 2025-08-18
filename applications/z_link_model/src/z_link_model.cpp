@@ -1435,8 +1435,10 @@ int main(int argc, char **argv) {
 
 #if PARITY==0
     hila::out0 << "Using full 4D coordiantes for staggering\n";
-#else
+#elif PARITY==1
     hila::out0 << "Using spatial 3D coordiantes for staggering\n";
+#else
+    hila::out0 << "Using temporal coordiante for staggering\n";
 #endif
 
 #if PLAQ_SHIFT == 1

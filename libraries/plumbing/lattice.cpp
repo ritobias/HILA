@@ -1,7 +1,9 @@
 
+#include <algorithm>
 #include "plumbing/defs.h"
 #include "plumbing/lattice.h"
 #include "plumbing/field.h"
+
 
 // Reporting on possibly too large node: stop if
 // node size (with buffers) is larger than 2^31 - too close for comfort!
@@ -43,13 +45,20 @@ void lattice_struct::setup(const CoordinateVector &siz) {
         l_volume *= siz[i];
     }
 
+    if (nn_map == nullptr) {
+        nn_map = new nn_map_t(l_size);
+    }
+
     setup_layout();
 
     setup_nodes();
 
     // set up the comm arrays
+#ifndef GENGATHER
     create_std_gathers();
-
+#else
+    create_gen_std_gathers();
+#endif
     // Initialize wait_array structures - has to be after std gathers()
     initialize_wait_arrays();
 
@@ -423,8 +432,10 @@ void lattice_struct::node_struct::subnode_struct::setup(const node_struct &tn) {
 /// TODO: implement some other neighbour schemas!
 /////////////////////////////////////////////////////////////////////
 
+
 void lattice_struct::create_std_gathers() {
 
+    hila::out0 << "using standard nn gathering\n";
     // allocate neighbour arrays - TODO: these should
     // be allocated on "device" memory too!
 
@@ -563,6 +574,214 @@ void lattice_struct::create_std_gathers() {
         if (c_offset >= (1ULL << 32))
             too_large_node = 1;
 
+    } /* directions */
+
+    /* Finally, set the site to the final offset (better be right!) */
+    mynode.field_alloc_size = c_offset;
+
+    if (hila::reduce_node_sum(too_large_node) > 0) {
+        report_too_large_node();
+    }
+}
+
+void lattice_struct::create_gen_std_gathers() {
+    hila::out0 << "using generalized standard nn gathering\n";
+    // allocate neighbour arrays - TODO: these should
+    // be allocated on "device" memory too!
+
+    for (int d = 0; d < NDIRS; d++) {
+        neighb[d] = (unsigned *)memalloc(((size_t)mynode.sites) * sizeof(unsigned));
+    }
+
+    size_t c_offset = mynode.sites; // current offset in field-arrays
+
+    // We set the communication and the neigbour-array here
+    int too_large_node = 0;
+
+    for (Direction d = e_x; d < NDIRS; ++d) {
+
+        gen_comminfo[d].index = neighb[d]; // this is not really used for nn gathers
+
+        std::vector<comm_node_struct> &from_nodel = gen_comminfo[d].from_node;
+        // we can do the opposite send during another pass of the sites.
+        // This is just the gather inverted
+        // NOTE: this is not the send to Direction d, but to -d!
+        std::vector<comm_node_struct> &to_nodel = gen_comminfo[-d].to_node;
+
+        std::vector<int> rank_index(lattice.n_nodes());
+        std::fill(rank_index.begin(), rank_index.end(), -1);
+        std::vector<int> reshuffle_list(mynode.sites);
+        std::fill(reshuffle_list.begin(), reshuffle_list.end(), -1);
+
+        // flag to be set if an even/odd-mismatch occurs in communication
+        size_t even_odd_mismatch = false;
+
+        // pass over sites
+        int nranks = 0; // number of other ranks involved
+        for (size_t i = 0; i < mynode.sites; ++i) {
+            CoordinateVector ln, l;
+            l = coordinates(i);
+            // set ln to be the neighbour of the site
+            // TODO: FIXED BOUNDARY CONDITIONS DO NOT WRAP
+            ln = (*nn_map)(l, d);
+            // ln = l;
+            // if (is_up_dir(d)) ln[d] = (l[d] + 1) % size(d);
+            // else ln[d] = (l[d] + size(-d) - 1) % size(-d);
+
+            if (is_on_mynode(ln)) {
+                neighb[d][i] = site_index(ln);
+            } else {
+                unsigned rank = node_rank(ln);
+                reshuffle_list[i] = rank;
+                if (rank_index[rank] == -1) {
+                    from_nodel.push_back(comm_node_struct());
+                    from_nodel.back().rank = rank;
+                    to_nodel.push_back(comm_node_struct());
+                    to_nodel.back().rank = rank;
+                    rank_index[rank] = nranks;
+                    ++nranks;
+                }
+
+                // reset neighb array temporarily, as a flag
+                neighb[d][i] = mynode.sites;
+
+                comm_node_struct &from_node = from_nodel[rank_index[rank]];
+                comm_node_struct &to_node = to_nodel[rank_index[rank]];
+                from_node.sites++;
+                to_node.sites++;
+                Parity lpar = l.parity();
+                if (lpar == EVEN)
+                    from_node.evensites++;
+                else
+                    from_node.oddsites++;
+                Parity lnpar = ln.parity();
+                if (lnpar == EVEN)
+                    to_node.evensites++;
+                else
+                    to_node.oddsites++;
+
+                if(lnpar != opp_parity(lpar)) {
+                    even_odd_mismatch = true;
+                }
+            }
+        }
+
+        assert(nranks < MAX_GG_PER_DIR &&
+               "too many ranks per direction to communicate with");
+
+        
+        assert(even_odd_mismatch == false && "even/odd sites mismatch in communication");
+
+        // order of communication with the involved nodes per direction will be in order of
+        // decreasing message size:
+        std::stable_sort(from_nodel.begin(), from_nodel.end(),
+                  [](comm_node_struct a, comm_node_struct b) { return a.sites > b.sites; });
+
+        for (size_t inode = 0; inode < from_nodel.size(); ++inode) {
+            comm_node_struct &from_node = from_nodel[inode];
+            comm_node_struct &to_node = to_nodel[inode];
+
+            // and set buffer indices
+            from_node.buffer = c_offset;
+
+            if (to_node.sites > 0) {
+                // sitelist tells us which sites to send
+                to_node.sitelist = (unsigned *)memalloc(to_node.sites * sizeof(unsigned));
+#ifndef VANILLA
+                from_node.sitelist = (unsigned *)memalloc(from_node.sites * sizeof(unsigned));
+#endif
+            } else {
+                to_node.sitelist = nullptr;
+#ifndef VANILLA
+                from_node.sitelist = nullptr;
+#endif
+            }
+
+            if (from_node.sites > 0) {
+                size_t c_even, c_odd;
+                c_even = c_odd = 0;
+                // the following array store for each site that has to be sent to another node
+                // the index it will have on that node. This is needed to ensure that to_node.sitelist
+                // is correctly orderd, which is not automatically the case for non-trivial topologies.
+                std::vector<unsigned> to_node_es(to_node.evensites);
+                std::vector<unsigned> to_node_os(to_node.oddsites);
+                size_t in;
+                for (size_t i = 0; i < mynode.sites; ++i) {
+                    if (neighb[d][i] == mynode.sites && reshuffle_list[i] == from_node.rank) {
+                        CoordinateVector l, ln;
+                        l = coordinates(i);
+                        ln = (*nn_map)(l, d);
+                        in = site_index(ln, to_node.rank);
+                        if (l.parity() == EVEN) {
+                            // THIS site is even
+                            neighb[d][i] = c_offset + c_even;
+                            if (c_offset + c_even >= (1ULL << 32))
+                                too_large_node = 1;
+#ifndef VANILLA
+                            from_node.sitelist[c_even] = i;
+#endif
+                            // flipped parity: this is for odd sends
+                            to_node.sitelist[c_even + to_node.evensites] = i;
+                            to_node_os[c_even] = in;
+
+                            ++c_even;
+                        } else {
+                            neighb[d][i] = c_offset + from_node.evensites + c_odd;
+                            if (c_offset + from_node.evensites + c_odd >= (1ULL << 32))
+                                too_large_node = 1;
+#ifndef VANILLA
+                            from_node.sitelist[c_odd + from_node.evensites] = i;
+#endif
+                            // flipped parity: this is for even sends
+                            to_node.sitelist[c_odd] = i;
+                            to_node_es[c_odd] = in;
+
+                            ++c_odd;
+                        }
+                    }
+                }
+                if(to_node.evensites>0) {
+                    // order even site part of to_node.sitelist according to the index of the target
+                    // sites on the target node:
+                    unsigned len = to_node.evensites;
+                    std::vector<unsigned> idx(len);
+                    for (size_t i = 0; i < len; ++i) {
+                        idx[i] = i;
+                    }
+                    std::stable_sort(idx.begin(), idx.end(), [&to_node_es](size_t i1, size_t i2) {
+                        return to_node_es[i1] < to_node_es[i2];
+                    });
+                    for (size_t i = 0; i < len; ++i) {
+                        to_node_es[i] = to_node.sitelist[i];
+                    }
+                    for (size_t i = 0; i < len; ++i) {
+                        to_node.sitelist[i] = to_node_es[idx[i]];
+                    }
+                }
+                if(to_node.oddsites>0) {
+                    // order odd site part of to_node.sitelist according to the index of the target
+                    // sites on the target node:
+                    unsigned len = to_node.oddsites;
+                    std::vector<unsigned> idx(len);
+                    for (size_t i = 0; i < len; ++i) {
+                        idx[i] = i;
+                    }
+                    std::stable_sort(idx.begin(), idx.end(), [&to_node_os](size_t i1, size_t i2) {
+                        return to_node_os[i1] < to_node_os[i2];
+                    });
+                    for (size_t i = 0; i < len; ++i) {
+                        to_node_os[i] = to_node.sitelist[to_node.evensites + i];
+                    }
+                    for (size_t i = 0; i < len; ++i) {
+                        to_node.sitelist[to_node.evensites + i] = to_node_os[idx[i]];
+                    }
+                }
+                c_offset += c_even + c_odd;
+            }
+
+            if (c_offset >= (1ULL << 32))
+                too_large_node = 1;
+        }
     } /* directions */
 
     /* Finally, set the site to the final offset (better be right!) */

@@ -122,7 +122,7 @@ T *Field<T>::field_struct::get_receive_buffer(Direction d, Parity par,
 
     unsigned offs = 0;
     if (par == ODD)
-        offs = from_node.sites / 2;
+        offs = from_node.evensites;
     if (receive_buffer[d] == nullptr) {
         receive_buffer[d] = payload.allocate_mpi_buffer(from_node.sites);
     }
@@ -136,7 +136,7 @@ T *Field<T>::field_struct::get_receive_buffer(Direction d, Parity par,
     } else {
         unsigned offs = 0;
         if (par == ODD)
-            offs = from_node.sites / 2;
+            offs = from_node.evensites;
 
         if (vector_lattice->is_boundary_permutation[abs(d)]) {
             // extra copy operation needed
@@ -267,10 +267,6 @@ dir_mask_t Field<T>::start_gather(Direction d, Parity p) const {
 
     int tag = get_next_msg_tag();
 
-    lattice_struct::nn_comminfo_struct &ci = lattice.nn_comminfo[d];
-    lattice_struct::comm_node_struct &from_node = ci.from_node;
-    lattice_struct::comm_node_struct &to_node = ci.to_node;
-
     // check if this is done - either gathered or no comm to be done in the 1st place
 
     if (is_gathered(d, p)) {
@@ -280,12 +276,36 @@ dir_mask_t Field<T>::start_gather(Direction d, Parity p) const {
 
     // No comms to do, nothing to wait for -- we'll use the is_gathered
     // status to keep track of vector boundary shuffle anyway
+#ifndef GENGATHER
+    lattice_struct::nn_comminfo_struct &ci = lattice.nn_comminfo[d];
+    lattice_struct::comm_node_struct &from_node = ci.from_node;
+    lattice_struct::comm_node_struct &to_node = ci.to_node;
 
     if (from_node.rank == hila::myrank() && to_node.rank == hila::myrank()) {
         fs->set_local_boundary_elements(d, p);
         mark_gathered(d, p);
         return 0;
     }
+#else
+    lattice_struct::gen_comminfo_struct &ci = lattice.gen_comminfo[d];
+    std::vector<lattice_struct::comm_node_struct> &from_nodel = ci.from_node;
+    std::vector<lattice_struct::comm_node_struct> &to_nodel = ci.to_node;
+    bool ok = true;
+    for (size_t i = 0; i < from_nodel.size(); ++i) {
+        lattice_struct::comm_node_struct &from_node = from_nodel[i];
+        lattice_struct::comm_node_struct &to_node = to_nodel[i];
+
+        if (from_node.rank != hila::myrank() || to_node.rank != hila::myrank()) {
+            ok = false;
+            break;
+        }
+    }
+    if(ok) {
+        fs->set_local_boundary_elements(d, p);
+        mark_gathered(d, p);
+        return 0;
+    }
+#endif
 
     // if this parity or ALL-type gather is going on nothing to be done
     if (!gather_not_done(d, p) || !gather_not_done(d, ALL)) {
@@ -323,6 +343,7 @@ dir_mask_t Field<T>::start_gather(Direction d, Parity p) const {
     size_t size_type;
     MPI_Datatype mpi_type = get_MPI_number_type<T>(size_type);
 
+#ifndef GENGATHER
     if (from_node.rank != hila::myrank() && boundary_need_to_communicate(d)) {
 
         // HANDLE RECEIVES: get node which will send here
@@ -379,6 +400,70 @@ dir_mask_t Field<T>::start_gather(Direction d, Parity p) const {
         start_send_timer.stop();
     }
 
+#else
+    for (size_t inode = 0; inode < from_nodel.size(); ++inode) {
+        lattice_struct::comm_node_struct &from_node = from_nodel[inode];
+        lattice_struct::comm_node_struct &to_node = to_nodel[inode];
+
+        if (from_node.rank != hila::myrank()) {
+
+            // HANDLE RECEIVES: get node which will send here
+
+            // buffer can be separate or in Field buffer
+            receive_buffer = fs->get_receive_buffer(d, par, from_node);
+
+            // size_t n = from_node.n_sites(par) * size / size_type;
+            size_t n = from_node.n_sites(par) * size;
+
+            if (n >= (1ULL << 31)) {
+                hila::out << "Too large MPI message!  Size " << n << '\n';
+                hila::terminate(1);
+            }
+
+            post_receive_timer.start();
+
+            // c++ version does not return errors
+            // was mpi_type
+            MPI_Irecv(receive_buffer, (int)n, MPI_BYTE, from_node.rank, tag, lattice.mpi_comm_lat,
+                      &fs->receive_request[par_i][d][inode]);
+
+            post_receive_timer.stop();
+        }
+
+        if (to_node.rank != hila::myrank()) {
+            // HANDLE SENDS: Copy Field elements on the boundary to a send buffer and send
+
+            unsigned sites = to_node.n_sites(par);
+
+            if (fs->send_buffer[d] == nullptr)
+                fs->send_buffer[d] = fs->payload.allocate_mpi_buffer(to_node.sites);
+
+            send_buffer = fs->send_buffer[d] + to_node.offset(par);
+
+    #ifndef MPI_BENCHMARK_TEST
+            fs->gather_comm_elements(d, par, send_buffer, to_node);
+    #endif
+
+            // size_t n = sites * size / size_type;
+            size_t n = sites * size;
+
+    #ifdef GPU_AWARE_MPI
+            gpuStreamSynchronize(0);
+            // gpuDeviceSynchronize();
+    #endif
+
+            start_send_timer.start();
+
+            // was mpi_type
+            MPI_Isend(send_buffer, (int)n, MPI_BYTE, to_node.rank, tag, lattice.mpi_comm_lat,
+                      &fs->send_request[par_i][d][inode]);
+
+            start_send_timer.stop();
+        }
+    }
+
+#endif
+
     // and do the boundary shuffle here, after MPI has started
     // NOTE: there should be no danger of MPI and shuffle overwriting, MPI writes
     // to halo buffers only if no permutation is needed.  With a permutation MPI
@@ -401,13 +486,14 @@ dir_mask_t Field<T>::start_gather(Direction d, Parity p) const {
 template <typename T>
 void Field<T>::wait_gather(Direction d, Parity p) const {
 
-    lattice_struct::nn_comminfo_struct &ci = lattice.nn_comminfo[d];
-    lattice_struct::comm_node_struct &from_node = ci.from_node;
-    lattice_struct::comm_node_struct &to_node = ci.to_node;
-
     // check if this is done - either gathered or no comm to be done in the 1st place
     if (is_gathered(d, p))
         return;
+
+#ifndef GENGATHER
+    lattice_struct::nn_comminfo_struct &ci = lattice.nn_comminfo[d];
+    lattice_struct::comm_node_struct &from_node = ci.from_node;
+    lattice_struct::comm_node_struct &to_node = ci.to_node;
 
     // this is the branch if no comms -- shuffle was done in start_gather
     if (from_node.rank == hila::myrank() && to_node.rank == hila::myrank())
@@ -484,6 +570,102 @@ void Field<T>::wait_gather(Direction d, Parity p) const {
 
         par = opp_parity(par); // flip if 2 loops
     }
+
+#else
+
+    lattice_struct::gen_comminfo_struct &ci = lattice.gen_comminfo[d];
+    std::vector<lattice_struct::comm_node_struct> &from_nodel = ci.from_node;
+    std::vector<lattice_struct::comm_node_struct> &to_nodel = ci.to_node;
+    bool ok = true;
+    for (size_t i = 0; i < from_nodel.size(); ++i) {
+        lattice_struct::comm_node_struct &from_node = from_nodel[i];
+        lattice_struct::comm_node_struct &to_node = to_nodel[i];
+
+        // this is the branch if no comms -- shuffle was done in start_gather
+        if (from_node.rank != hila::myrank() || to_node.rank != hila::myrank())
+            ok = false;
+    }
+    if(ok) {
+        return;
+    }
+    // if (!is_gather_started(d,p)) {
+    //   hila::out0 << "Wait gather error - wait_gather without corresponding
+    //   start_gather\n"; exit(1);
+    // }
+
+    // Note: the move can be Parity p OR ALL -- need to wait for it in any case
+    // set par to be the "sum" over both parities
+    // There never should be ongoing ALL and other parity gather -- start_gather takes
+    // care
+
+    // check here consistency, this should never happen
+    assert(!(p != ALL && is_gather_started(d, p) && is_gather_started(d, ALL)));
+
+    Parity par;
+    int n_wait = 1;
+    // what par to wait for?
+    if (is_gather_started(d, p))
+        par = p; // standard match
+    else if (p != ALL) {
+        if (is_gather_started(d, ALL))
+            par = ALL; // if all is running wait for it
+        else {
+            exit(1);
+        }
+    } else {
+        // now p == ALL and ALL is not running
+        if (is_gathered(d, EVEN) && is_gather_started(d, ODD))
+            par = ODD;
+        else if (is_gathered(d, ODD) && is_gather_started(d, EVEN))
+            par = EVEN;
+        else if (is_gather_started(d, EVEN) && is_gather_started(d, ODD)) {
+            n_wait = 2; // need to wait for both!
+            par = EVEN; // will be flipped
+        } else {
+            exit(1);
+        }
+    }
+    for (int wait_i = 0; wait_i < n_wait; ++wait_i) {
+
+        int par_i = (int)par - 1;
+  
+        for (size_t inode = 0; inode < from_nodel.size(); ++inode) {
+            lattice_struct::comm_node_struct &from_node = from_nodel[inode];
+            lattice_struct::comm_node_struct &to_node = to_nodel[inode];
+
+
+
+            if (from_node.rank != hila::myrank() && boundary_need_to_communicate(d)) {
+                wait_receive_timer.start();
+                MPI_Status status;
+                MPI_Wait(&fs->receive_request[par_i][d][inode], &status);
+                wait_receive_timer.stop();
+#if !defined(VANILLA) && !defined(MPI_BENCHMARK_TEST)
+                fs->place_comm_elements(d, par, fs->get_receive_buffer(d, par, from_node), from_node);
+#endif
+            }
+
+            // then wait for the sends
+            if (to_node.rank != hila::myrank() && boundary_need_to_communicate(-d)) {
+                wait_send_timer.start();
+                MPI_Status status;
+                MPI_Wait(&fs->send_request[par_i][d][inode], &status);
+                wait_send_timer.stop();
+            }
+        }
+
+        // Mark the parity gathered from Direction dir
+        mark_gathered(d, par);
+
+        // Keep count of communications
+        lattice.n_gather_done += 1;
+
+        par = opp_parity(par); // flip if 2 loops
+
+    }
+
+
+#endif
 }
 
 

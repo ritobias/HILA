@@ -87,9 +87,14 @@ class Field {
         // diff. fields
         const unsigned *RESTRICT neighbours[NDIRS];
         hila::bc boundary_condition[NDIRS];
-
+#ifndef GENGATHER
         MPI_Request receive_request[3][NDIRS];
         MPI_Request send_request[3][NDIRS];
+#else
+        MPI_Request receive_request[3][NDIRS][MAX_GG_PER_DIR];
+        MPI_Request send_request[3][NDIRS][MAX_GG_PER_DIR];
+#endif
+
 #ifndef VANILLA
         // vanilla needs no special receive buffers
         T *receive_buffer[NDIRS];

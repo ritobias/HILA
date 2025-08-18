@@ -19,10 +19,10 @@ void gather_test() {
 
 
     foralldir (d) {
-
+#ifndef GENGATHER
         CoordinateVector dif1 = 0, dif2 = 0;
         Field<CoordinateVector> f1, f2;
-        
+
         onsites(ALL) {
             f1[X] = X.coordinates();
             f2[X] = (X.coordinates() + d).mod(lattice.size());
@@ -44,6 +44,67 @@ void gather_test() {
                     << " direction " << (unsigned)d << " dif2 " << dif2 << '\n';
             hila::terminate(1);
         }
+#else
+        //test correct working of generalized nn gathering:
+        Field<CoordinateVector> f;
+        onsites(ALL) {
+            f[X] = X.coordinates();
+        }
+        bool terminate = false;
+        {
+            Field<CoordinateVector> f1;
+            onsites(ALL) {
+                f1[X] = f[X + d];
+            }
+            // Since (*lattice.nn_map)(l, d) can't be called inside site-loop, we transfer the field to node 0
+            // (should probably be turned off for large lattices)
+            auto f1l = f1.get_slice({-1, -1, -1, -1});
+            if (hila::myrank() == 0) {
+                CoordinateVector l, ln;
+                CoordinateVector dif1 = 0;
+                for (size_t i = 0; i < lattice.volume(); ++i) {
+                    l = lattice.global_coordinates(i);
+                    ln = (*lattice.nn_map)(l, d);
+                    dif1 = abs(f1l[i] - ln);
+                    if (dif1.squarenorm() != 0) {
+                        hila::out0 << " gen std up-gather test error! Node " << lattice.node_rank(l)
+                                   << " direction " << (unsigned)d << " (to node "
+                                   << lattice.node_rank(ln) << ")" << " dif1=(" << dif1 << ") l=("
+                                   << l << ") ln=(" << ln << ") f1l=(" << f1l[i] << ")" << '\n';
+                        terminate = true;
+                    }
+                }
+            }
+        }
+        {
+            Field<CoordinateVector> f2;
+            onsites(ALL) {
+                f2[X] = f[X - d];
+            }
+            auto f2l = f2.get_slice({-1, -1, -1, -1});
+            if (hila::myrank() == 0) {
+                CoordinateVector l, ln;
+                CoordinateVector dif2 = 0;
+                for (size_t i = 0; i < lattice.volume(); ++i) {
+                    l = lattice.global_coordinates(i);
+                    ln = (*lattice.nn_map)(l, -d);
+                    dif2 = abs(f2l[i] - ln);
+                    if (dif2.squarenorm() != 0) {
+                        hila::out0 << " gen std down-gather test error! Node "
+                                   << lattice.node_rank(l) << " direction " << (unsigned)d
+                                   << " (to node " << lattice.node_rank(ln) << ")" << " dif2=("
+                                   << dif2 << ") l=(" << l << ") ln=(" << ln << ") f2l=(" << f2l[i]
+                                   << ")" << '\n';
+                        terminate = true;
+                    }
+                }
+            }
+        }
+        hila::broadcast(terminate);
+        if (terminate) {
+            hila::terminate(1);
+        }
+#endif
 
 #if 0 && defined(SPECIAL_BOUNDARY_CONDITIONS)
         // test antiperiodic b.c. to one direction

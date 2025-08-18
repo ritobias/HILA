@@ -14,6 +14,10 @@
 #include "plumbing/coordinates.h"
 #include "plumbing/timing.h"
 
+// define the maximum number of nodes with which a single node can have neighboring sites per parity
+// and direction (used for generalized nearest neighbor gathers)
+#define MAX_GG_PER_DIR 5
+
 #ifdef SUBNODE_LAYOUT
 #ifndef VECTOR_SIZE
 #if defined(CUDA) || defined(HIP)
@@ -27,18 +31,17 @@ constexpr unsigned number_of_subnodes = VECTOR_SIZE / sizeof(float);
 #endif
 
 namespace hila {
-/// list of field boundary conditions - used only if SPECIAL_BOUNDARY_CONDITIONS defined
-enum class bc { PERIODIC, ANTIPERIODIC, DIRICHLET };
+    /// list of field boundary conditions - used only if SPECIAL_BOUNDARY_CONDITIONS defined
+    enum class bc { PERIODIC, ANTIPERIODIC, DIRICHLET };
 
-/// False if we have b.c. which does not require communication
-inline bool bc_need_communication(hila::bc bc) {
-    if (bc == hila::bc::DIRICHLET) {
-        return false;
-    } else {
-        return true;
+    /// False if we have b.c. which does not require communication
+    inline bool bc_need_communication(hila::bc bc) {
+        if (bc == hila::bc::DIRICHLET) {
+            return false;
+        } else {
+            return true;
+        }
     }
-}
-
 } // namespace hila
 
 void test_std_gathers();
@@ -57,6 +60,17 @@ struct node_info {
 /// this through lattice.backend_lattice.
 struct backend_lattice_struct;
 
+// class to specify user defined nearest neighbor connectivity
+class nn_map_t {
+  public:
+    CoordinateVector lsize;
+    nn_map_t(const CoordinateVector &tlsize) : lsize(tlsize) {}
+    virtual ~nn_map_t() {}
+    virtual CoordinateVector operator()(const CoordinateVector &l, const Direction &d) {
+        return (l + d).mod(lsize);
+    }
+};
+
 /// The lattice struct defines the lattice geometry ans sets up MPI communication
 /// patterns
 class lattice_struct {
@@ -67,6 +81,18 @@ class lattice_struct {
     int l_label; // running number, identification of the lattice (TODO)
 
   public:
+    nn_map_t *nn_map = nullptr;
+
+    /*
+    CoordinateVector nnf(const CoordinateVector &l, const Direction &d) {
+        if(nn_map != nullptr) {
+            return (*nn_map)(l, d);
+        } else {
+            return (l + d).mod(size());
+        }
+    }
+    */
+
     /// Information about the node stored on this process
     struct node_struct {
         lattice_struct *parent = nullptr; // parent lattice, in order to access methods
@@ -199,6 +225,9 @@ class lattice_struct {
     /// nearest neighbour comminfo struct
     std::array<nn_comminfo_struct, NDIRS> nn_comminfo;
 
+    /// general comminfo struct
+    std::array<gen_comminfo_struct, NDIRS> gen_comminfo;
+
     /// Main neighbour index array
     unsigned *RESTRICT neighb[NDIRS];
 
@@ -270,6 +299,8 @@ class lattice_struct {
     }
 
     void create_std_gathers();
+    void create_gen_std_gathers();
+
     gen_comminfo_struct create_general_gather(const CoordinateVector &r);
     std::vector<comm_node_struct> create_comm_node_vector(CoordinateVector offset, unsigned *index,
                                                           bool receive);

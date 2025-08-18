@@ -35,12 +35,13 @@ void lattice_struct::setup_layout() {
     hila::out0 << "Dividing to " << hila::number_of_nodes() << " nodes\n";
     hila::out0 << "Layout using vector of " << number_of_subnodes << " elements\n";
 
+#ifndef GENGATHER
     foralldir (d)
         if (size(d) % 2 != 0) {
             hila::out0 << "Lattice must be even to all directions (odd size:TODO)\n";
             hila::finishrun();
         }
-
+#endif
     // we want to divide up to numnode * vector_size virtual nodes
     // use the float vector size to divide to hila::number_of_nodes() * vector_size
     // nodes, this is the most demanding. The directions where the extra divisions have
