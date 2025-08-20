@@ -508,8 +508,8 @@ void lattice_struct::create_std_gathers() {
         to_node.buffer = 0;
 
         // determine required send_buffer size:
-        if (to_node.sites > comm_buffer_size[d]) {
-            comm_buffer_size[d] = to_node.sites;
+        if (from_node.sites > comm_buffer_size[d]) {
+            comm_buffer_size[d] = from_node.sites;
         }
 
         to_node.rank = from_node.rank;
@@ -591,6 +591,7 @@ void lattice_struct::create_std_gathers() {
     }
 }
 
+#ifdef GENGATHER
 void lattice_struct::create_gen_std_gathers() {
     hila::out0 << "using generalized standard nn gathering\n";
     // allocate neighbour arrays - TODO: these should
@@ -716,14 +717,14 @@ void lattice_struct::create_gen_std_gathers() {
                 if (to_node.sites > 0) {
                     // sitelist tells us which sites to send
                     to_node.sitelist = (unsigned *)memalloc(to_node.sites * sizeof(unsigned));
-    #ifndef VANILLA
+#ifndef VANILLA
                     from_node.sitelist = (unsigned *)memalloc(from_node.sites * sizeof(unsigned));
-    #endif
+#endif
                 } else {
                     to_node.sitelist = nullptr;
-    #ifndef VANILLA
+#ifndef VANILLA
                     from_node.sitelist = nullptr;
-    #endif
+#endif
                 }
 
                 if (from_node.sites > 0) {
@@ -746,9 +747,9 @@ void lattice_struct::create_gen_std_gathers() {
                                 neighb_d[i] = c_offset + c_even;
                                 if (c_offset + c_even >= (1ULL << 32))
                                     too_large_node = 1;
-    #ifndef VANILLA
+#ifndef VANILLA
                                 from_node.sitelist[c_even] = i;
-    #endif
+#endif
                                 // flipped parity: this is for odd sends
                                 to_node.sitelist[to_node.evensites + c_even] = i;
                                 to_node_os[c_even] = in;
@@ -758,9 +759,9 @@ void lattice_struct::create_gen_std_gathers() {
                                 neighb_d[i] = c_offset + from_node.evensites + c_odd;
                                 if (c_offset + from_node.evensites + c_odd >= (1ULL << 32))
                                     too_large_node = 1;
-    #ifndef VANILLA
+#ifndef VANILLA
                                 from_node.sitelist[c_odd + from_node.evensites] = i;
-    #endif
+#endif
                                 // flipped parity: this is for even sends
                                 to_node.sitelist[c_odd] = i;
                                 to_node_es[c_odd] = in;
@@ -821,7 +822,7 @@ void lattice_struct::create_gen_std_gathers() {
         report_too_large_node();
     }
 }
-
+#endif // ifdef GENGATHER
 
 /************************************************************************/
 

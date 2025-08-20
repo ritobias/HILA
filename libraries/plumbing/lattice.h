@@ -14,6 +14,7 @@
 #include "plumbing/coordinates.h"
 #include "plumbing/timing.h"
 
+
 #ifdef GENGATHER
 // define the maximum number of nodes with which a single node can have neighboring sites per parity
 // and direction (used for generalized nearest neighbor gathers)
