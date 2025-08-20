@@ -113,7 +113,7 @@ struct vectorized_lattice_struct {
         get_boundary_permutations();
 
         for (Direction d = (Direction)0; d < NDIRS; d++) {
-            neighbours[d] = (unsigned *)memalloc(v_sites * sizeof(unsigned));
+            neighbours[d] = (unsigned *)memalloc(v_sites * lattice.nn_map.size() * sizeof(unsigned));
         }
 
         get_neighbours_and_local_halo();
