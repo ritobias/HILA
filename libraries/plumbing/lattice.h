@@ -66,8 +66,8 @@ class nn_map_t {
     CoordinateVector lsize;
     nn_map_t(const CoordinateVector &tlsize) : lsize(tlsize) {}
     virtual ~nn_map_t() {}
-    virtual CoordinateVector operator()(const CoordinateVector &l, const Direction &d) {
-        return (l + d).mod(lsize);
+    virtual CoordinateVector operator()(const CoordinateVector &c, const Direction &d) {
+        return (c + d).mod(lsize);
     }
 };
 
@@ -81,7 +81,8 @@ class lattice_struct {
     int l_label; // running number, identification of the lattice (TODO)
 
   public:
-    nn_map_t *nn_map = nullptr;
+    std::vector<nn_map_t *> nn_map;
+    size_t comm_buffer_size[NDIRS];
 
     /*
     CoordinateVector nnf(const CoordinateVector &l, const Direction &d) {
@@ -226,7 +227,8 @@ class lattice_struct {
     std::array<nn_comminfo_struct, NDIRS> nn_comminfo;
 
     /// general comminfo struct
-    std::array<gen_comminfo_struct, NDIRS> gen_comminfo;
+    //std::array<gen_comminfo_struct, NDIRS> gen_comminfo;
+    std::vector<std::array<gen_comminfo_struct, NDIRS>> gen_comminfol;
 
     /// Main neighbour index array
     unsigned *RESTRICT neighb[NDIRS];
@@ -313,10 +315,10 @@ class lattice_struct {
     void init_special_boundaries();
     void setup_special_boundary_array(Direction d);
 
-    const unsigned *get_neighbour_array(Direction d, hila::bc bc);
+    const unsigned *get_neighbour_array(Direction d, hila::bc bc, int nn_topo = 0);
 #else
-    const unsigned *get_neighbour_array(Direction d, hila::bc bc) {
-        return neighb[d];
+    const unsigned *get_neighbour_array(Direction d, hila::bc bc, int nn_topo = 0) {
+        return neighb[d] + nn_topo * mynode.volume();
     }
 #endif
 

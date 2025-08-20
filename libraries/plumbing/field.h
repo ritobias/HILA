@@ -76,6 +76,7 @@ class Field {
       public:
         field_storage<T> payload; // TODO: must be maximally aligned, modifiers - never null
         int lattice_id;
+        int nn_topo;
 #ifdef VECTORIZED
         // get a direct ptr from here too, ease access
         vectorized_lattice_struct<hila::vector_info<T>::vector_size> *vector_lattice;
@@ -85,7 +86,7 @@ class Field {
 
         // neighbour pointers - because of boundary conditions, can be different for
         // diff. fields
-        const unsigned *RESTRICT neighbours[NDIRS];
+        unsigned *RESTRICT neighbours[NDIRS];
         hila::bc boundary_condition[NDIRS];
 #ifndef GENGATHER
         MPI_Request receive_request[3][NDIRS];
@@ -106,8 +107,18 @@ class Field {
          */
         void initialize_communication() {
             for (int d = 0; d < NDIRS; d++) {
-                for (int p = 0; p < 3; p++)
+                for (int p = 0; p < 3; p++) {
                     gather_status_arr[p][d] = gather_status_t::NOT_DONE;
+#ifndef GENGATHER
+                    receive_request[p][d] = nullptr;
+                    send_request[p][d] = nullptr;
+#else
+                    for (int iggpn = 0; iggpn < MAX_GG_PER_DIR; ++iggpn) {
+                        receive_request[p][d][iggpn] = nullptr;
+                        send_request[p][d][iggpn] = nullptr;
+                    }
+#endif
+                }
                 send_buffer[d] = nullptr;
 #ifndef VANILLA
                 receive_buffer[d] = nullptr;
@@ -145,6 +156,23 @@ class Field {
          */
         void free_payload() {
             payload.free_field();
+        }
+
+
+        /**
+         * @internal
+         * @brief Set the payload to reference to the payload of another field
+         */
+        void allocate_payload_from_ref(const field_storage<T> &other) {
+            payload.set_field_ref(lattice, other);
+        }
+
+        /**
+         * @internal
+         * @brief Remove reference to payload of other field
+         */
+        void free_payload_ref() {
+            payload.delete_field_ref();
         }
 
 #ifndef VECTORIZED
@@ -246,6 +274,8 @@ class Field {
      * about it.
      */
     field_struct *RESTRICT fs;
+    Field* is_ref_of;
+    std::vector<Field *> has_refs;
 
     /**
      * @brief Field constructor
@@ -292,8 +322,31 @@ class Field {
         static_assert(!std::is_same<hila::arithmetic_type<T>, long double>::value,
                       "Type 'long double' numbers in Field<> not supported by cuda/hip");
 #endif
-
         fs = nullptr; // lazy allocation on 1st use
+        is_ref_of = nullptr;
+        for (int i = 0; i < lattice.nn_map.size(); ++i) {
+            has_refs.push_back(nullptr);
+        }
+    }
+    /**
+     * @internal
+     * @brief Construct Field that references the field data of other field but using different nn-topology
+     * @param other
+     * @param nn_topo 
+     */
+    Field(Field &other, int nn_topo) : Field() {
+        assert(other.is_initialized(ALL) && "Initializer Field value not set");
+        assert(0 <= nn_topo && nn_topo < lattice.nn_map.size() &&
+               "Invalid nn_topo value for ref. Field");
+        if (other.is_ref_of == nullptr) {
+            is_ref_of = &other;
+        } else {
+            is_ref_of = other.is_ref_of;
+        }
+        assert(other.has_refs[nn_topo] == nullptr &&
+               "Ref. Field with same nn_topo already exists");
+        other.has_refs[nn_topo] = this;
+        allocate_with_ref(other.fs, nn_topo);
     }
     /**
      * @internal
@@ -304,6 +357,7 @@ class Field {
         assert(other.is_initialized(ALL) && "Initializer Field value not set");
 
         (*this)[ALL] = other[X];
+
     }
     /**
      * @internal
@@ -352,7 +406,11 @@ class Field {
     }
 
     ~Field() {
-        free();
+        if(is_ref_of == nullptr) {
+            free();
+        } else {
+            free_with_ref();
+        }
 
 #ifdef HILAPP
         // Because destructor is instantiated for all fields,
@@ -374,6 +432,8 @@ class Field {
         }
         fs = (field_struct *)memalloc(sizeof(field_struct));
         fs->lattice_id = lattice.id();
+        fs->nn_topo = 0;
+        has_refs[0] = this;
         fs->allocate_payload();
         fs->initialize_communication();
         mark_changed(ALL);   // guarantees communications will be done
@@ -382,9 +442,10 @@ class Field {
         for (Direction d = (Direction)0; d < NDIRS; ++d) {
 
 #if !defined(CUDA) && !defined(HIP)
-            fs->neighbours[d] = lattice.neighb[d];
+            fs->neighbours[d] = lattice.neighb[d] + fs->nn_topo * lattice.mynode.volume();
 #else
-            fs->payload.neighbours[d] = lattice.backend_lattice->d_neighb[d];
+            fs->payload.neighbours[d] =
+                lattice.backend_lattice->d_neighb[d] + fs->nn_topo * lattice.mynode.volume();
 #endif
         }
 
@@ -411,9 +472,84 @@ class Field {
      */
     void free() {
         if (fs != nullptr && !hila::about_to_finish) {
+            has_refs[fs->nn_topo] = nullptr;
+            if (!hila::about_to_finish) {
+                for (int i = 0; i < has_refs.size(); ++i) {
+                    if (has_refs[i] != nullptr) {
+                        has_refs[i]->free_with_ref();
+                        has_refs[i]->is_ref_of = nullptr;
+                        has_refs[i] = nullptr;
+                    }
+                }
+            }
             for (Direction d = (Direction)0; d < NDIRS; ++d)
                 drop_comms(d, ALL);
             fs->free_payload();
+            fs->free_communication();
+            std::free(fs);
+            fs = nullptr;
+        }
+    }
+
+    /**
+     * @internal
+     * @brief  Sets up memory for communication and reference to field content.
+     */
+    void allocate_with_ref(field_struct *otherfs, int nn_topo) {
+        assert(fs == nullptr);
+        if (lattice.volume() == 0) {
+            hila::out0 << "Can not allocate Field variables before lattice.setup()\n";
+            hila::terminate(0);
+        }
+        fs = (field_struct *)memalloc(sizeof(field_struct));
+        fs->lattice_id = lattice.id();
+        fs->nn_topo = nn_topo;
+        fs->allocate_payload_from_ref(otherfs->payload);
+        fs->initialize_communication();
+        mark_changed(ALL);   // guarantees communications will be done
+        fs->assigned_to = otherfs->assigned_to; // and this means that it is not assigned
+
+        for (Direction d = (Direction)0; d < NDIRS; ++d) {
+
+#if !defined(CUDA) && !defined(HIP)
+            fs->neighbours[d] = lattice.neighb[d] + fs->nn_topo * lattice.mynode.volume();
+#else
+            fs->payload.neighbours[d] =
+                lattice.backend_lattice->d_neighb[d] + fs->nn_topo * lattice.mynode.volume();
+#endif
+        }
+
+#ifdef SPECIAL_BOUNDARY_CONDITIONS
+        foralldir(dir) {
+            fs->boundary_condition[dir] = hila::bc::PERIODIC;
+            fs->boundary_condition[-dir] = hila::bc::PERIODIC;
+        }
+#endif
+
+#ifdef VECTORIZED
+        if constexpr (hila::is_vectorizable_type<T>::value) {
+            fs->vector_lattice = lattice.backend_lattice
+                                     ->get_vectorized_lattice<hila::vector_info<T>::vector_size>();
+        } else {
+            fs->vector_lattice = nullptr;
+        }
+#endif
+    }
+
+
+    /**
+     * @brief Destroys field data
+     * @details don't call destructors when exiting - either MPI or cuda can already be off.
+     */
+    void free_with_ref() {
+        if (fs != nullptr && !hila::about_to_finish) {
+            if(is_ref_of != nullptr) {
+                is_ref_of->has_refs[fs->nn_topo] = nullptr;
+                is_ref_of = nullptr;
+            }
+            for (Direction d = (Direction)0; d < NDIRS; ++d)
+                drop_comms(d, ALL);
+            fs->free_payload_ref();
             fs->free_communication();
             std::free(fs);
             fs = nullptr;
@@ -485,7 +621,7 @@ class Field {
 
         for (Direction i = (Direction)0; i < NDIRS; ++i) {
             // check if there's ongoing comms, invalidate it!
-            drop_comms(i, opp_parity(p));
+            drop_comms(i, opp_parity(p)); 
 
             set_gather_status(opp_parity(p), i, gather_status_t::NOT_DONE);
             if (p != ALL) {
@@ -563,6 +699,65 @@ class Field {
 
     /**
      * @internal
+     * @brief Construct Field that references the field data of other field but using different
+     * nn-topology
+     * @param other
+     * @param nn_topo
+     */
+    void make_ref_to(Field &other, int nn_topo) {
+        assert(0 <= nn_topo && nn_topo < lattice.nn_map.size() &&
+               "Invalid nn_topo value for ref. Field");
+        other.check_alloc();
+        if(is_ref_of == nullptr) {
+            free();
+        } else {
+            free_with_ref();
+        }
+        if (other.is_ref_of == nullptr) {
+            is_ref_of = &other;
+        } else {
+            is_ref_of = other.is_ref_of;
+        }
+        assert(other.has_refs[nn_topo] == nullptr && "Ref. Field with same nn_topo already exists");
+        other.has_refs[nn_topo] = this;
+        allocate_with_ref(other.fs, nn_topo);
+    }
+
+    void set_nn_topo(int nn_topo) {
+        assert(0 <= nn_topo && nn_topo < lattice.nn_map.size() &&
+               "Invalid nn_topo value used in Field::set_nn_topo(nn_topo)");
+        check_alloc();
+        //foralldir(d) wait_gather(d, ALL);
+        if (nn_topo == fs->nn_topo) {
+            //nothing to do if nn_topo is same as current value
+            return;
+        }
+        if(is_ref_of == nullptr) {
+            assert(has_refs[nn_topo] == nullptr && "Ref. Field with same nn_topo already exists");
+            has_refs[fs->nn_topo] = nullptr;
+            fs->nn_topo = nn_topo;
+            has_refs[fs->nn_topo] = this;
+        } else {
+            assert(is_ref_of->has_refs[nn_topo] == nullptr &&
+                   "Ref. Field with same nn_topo already exists");
+            is_ref_of->has_refs[fs->nn_topo] = nullptr;
+            fs->nn_topo = nn_topo;
+            is_ref_of->has_refs[fs->nn_topo] = this;
+        }
+
+        for (Direction d = (Direction)0; d < NDIRS; ++d) {
+#if !defined(CUDA) && !defined(HIP)
+            fs->neighbours[d] = lattice.neighb[d] + fs->nn_topo * lattice.mynode.volume();
+#else
+            fs->payload.neighbours[d] =
+                lattice.backend_lattice->d_neighb[d] + fs->nn_topo * lattice.mynode.volume();
+#endif
+        }
+        mark_changed(ALL);
+    }
+
+    /**
+     * @internal
      * @brief function boundary_need_to_communicate(dir) returns false if there's special B.C. which
      * does not need comms here, otherwise true
      */
@@ -603,8 +798,8 @@ class Field {
         fs->boundary_condition[dir] = bc;
         fs->boundary_condition[-dir] = bc;
 #if !defined(CUDA) && !defined(HIP)
-        fs->neighbours[dir] = lattice.get_neighbour_array(dir, bc);
-        fs->neighbours[-dir] = lattice.get_neighbour_array(-dir, bc);
+        fs->neighbours[dir] = lattice.get_neighbour_array(dir, bc, fs->nn_topo);
+        fs->neighbours[-dir] = lattice.get_neighbour_array(-dir, bc, fs->nn_topo);
 #else
         if (bc == hila::bc::PERIODIC) {
             fs->payload.neighbours[dir] = lattice.backend_lattice->d_neighb[dir];

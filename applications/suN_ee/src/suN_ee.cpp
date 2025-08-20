@@ -20,7 +20,7 @@ using mygroup = SU<NCOLOR, ftype>;
 struct parameters {
     ftype beta;         // inverse gauge coupling
     int s;              // number of replicas
-    int l;              // entangling region slab width
+    ftype l;              // entangling region slab width
     int n_traj;         // number of trajectories to generate
     int n_therm;        // number of thermalization trajectories (counts only accepted traj.)
     int n_update;       // number of heat-bath sweeps per "trajectory"
@@ -315,45 +315,62 @@ public:
     int s;
     int Nts;
     u_nn_map_t(const CoordinateVector &tlsize, int ts) : nn_map_t(tlsize), s(ts) {
-        Nts = lsize[e_t] / s;
-        hila::out0 << "using user-defined nn-mapping\n";
+        hila::out0 << "using user-defined nn-mapping with s=" << s << " replica\n";
+        if(s > 0 && lsize[e_t] % s == 0) { 
+            Nts = lsize[e_t] / s;
+        } else {
+            s = 1;
+            Nts = lsize[e_t];
+            hila::out0 << "  error: Nt=" << lsize[e_t] << " not divisible by s=" << s << "\n";
+            hila::terminate(1);
+        }
     }
     ~u_nn_map_t() {
 
     }
-    CoordinateVector operator()(const CoordinateVector &l, const Direction &d) {
-        CoordinateVector ln;
-        ln = l + d;
-        if(ln[e_t] >= lsize[e_t]) {
-            ln[e_t] = 0;
-        }
-        if (ln[e_t] < 0) {
-            ln[e_t] = lsize[e_t] - 1;
-        }
-        if (ln[e_y] >= lsize[e_y]) {
-            ln[e_z] += 1;
-            ln[e_y] = 0;
-        }
-        if (ln[e_y] < 0) {
-            ln[e_z] -= 1;
-            ln[e_y] = lsize[e_y] - 1;
-        }
-        if (ln[e_z] >= lsize[e_z]) {
-            ln[e_x] += 1;
-            ln[e_z] = 0;
-        }
-        if (ln[e_z] < 0) {
-            ln[e_x] -= 1;
-            ln[e_z] = lsize[e_z] - 1;
-        }
-        if (ln[e_x] >= lsize[e_x]) {
-            ln[e_x] = 0;
-        }
-        if (ln[e_x] < 0) {
-            ln[e_x] = lsize[e_x] - 1;
+    CoordinateVector operator()(const CoordinateVector &c, const Direction &d) {
+        CoordinateVector cn;
+        cn = c + d;
+        if(d==e_t) {
+            for (int ts = s; ts > 0; --ts) {
+                if (cn[e_t] == ts * Nts) {
+                    cn[e_t] = (ts - 1) * Nts;
+                    break;
+                }
+            }
+        } else if(d==e_t_down) {
+            for (int ts = 0; ts < s; ++ts) {
+                if (c[e_t] == ts * Nts) {
+                    cn[e_t] = (ts + 1) * Nts - 1;
+                    break;
+                }
+            }
         }
 
-        return ln;
+        if (cn[e_y] >= lsize[e_y]) {
+            cn[e_z] += 1;
+            cn[e_y] = 0;
+        }
+        if (cn[e_y] < 0) {
+            cn[e_z] -= 1;
+            cn[e_y] = lsize[e_y] - 1;
+        }
+        if (cn[e_z] >= lsize[e_z]) {
+            cn[e_x] += 1;
+            cn[e_z] = 0;
+        }
+        if (cn[e_z] < 0) {
+            cn[e_x] -= 1;
+            cn[e_z] = lsize[e_z] - 1;
+        }
+        if (cn[e_x] >= lsize[e_x]) {
+            cn[e_x] = 0;
+        }
+        if (cn[e_x] < 0) {
+            cn[e_x] = lsize[e_x] - 1;
+        }
+
+        return cn;
     }
 };
 
@@ -419,8 +436,11 @@ int main(int argc, char **argv) {
 
 
     // specify boundary conditions
-    u_nn_map_t nn_map(lsize, 2);
-    lattice.nn_map = &nn_map;
+    u_nn_map_t nn_map1(lsize, 2);
+    lattice.nn_map.push_back(&nn_map1);
+
+    u_nn_map_t nn_map2(lsize, 1);
+    lattice.nn_map.push_back(&nn_map2);
 
     // set up the lattice
     lattice.setup(lsize);
@@ -429,8 +449,10 @@ int main(int argc, char **argv) {
     hila::seed_random(seed);
 
     // Alloc gauge field and momenta (E)
-    GaugeField<mygroup> U;
-    VectorField<Algebra<mygroup>> E;
+    GaugeField<mygroup> U[2];
+    U[1].make_ref_to(U[0], 1);
+    VectorField<Algebra<mygroup>> E[2];
+    E[1].make_ref_to(E[0], 1);
 
     plaqw_t<ftype> plaqw;
     foralldir(d1) {
@@ -444,8 +466,8 @@ int main(int argc, char **argv) {
     // use negative trajectory for thermal
     int start_traj = -p.n_therm;
 
-    if (!restore_checkpoint(U, start_traj, p)) {
-        U = 1;
+    if (!restore_checkpoint(U[0], start_traj, p)) {
+        U[0] = 1;
     }
 
 
@@ -460,7 +482,7 @@ int main(int argc, char **argv) {
 
         update_timer.start();
 
-        do_trajectory(U, plaqw, p);
+        do_trajectory(U[0], plaqw, p);
 
         // put sync here in order to get approx gpu timing
         hila::synchronize_threads();
@@ -470,7 +492,7 @@ int main(int argc, char **argv) {
 
         hila::out0 << "Measure_start " << trajectory << '\n';
 
-        measure_stuff(U, plaqw);
+        measure_stuff(U[0], plaqw);
 
         hila::out0 << "Measure_end " << trajectory << '\n';
 
@@ -490,7 +512,7 @@ int main(int argc, char **argv) {
                     ftype gftime = hila::gettime();
                     hila::out0 << "Gflow_start " << gtrajectory << '\n';
 
-                    GaugeField<mygroup> V = U;
+                    GaugeField<mygroup> V = U[0];
 
                     ftype t_step = t_step0;
                     measure_gradient_flow_stuff(V, (ftype)0.0, t_step);
@@ -517,7 +539,7 @@ int main(int argc, char **argv) {
         }
 
         if (p.n_save > 0 && (trajectory + 1) % p.n_save == 0) {
-            checkpoint(U, trajectory, p);
+            checkpoint(U[0], trajectory, p);
         }
     }
 
