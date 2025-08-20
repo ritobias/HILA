@@ -14,9 +14,14 @@
 #include "plumbing/coordinates.h"
 #include "plumbing/timing.h"
 
+#ifdef GENGATHER
 // define the maximum number of nodes with which a single node can have neighboring sites per parity
 // and direction (used for generalized nearest neighbor gathers)
 #define MAX_GG_PER_DIR 5
+#ifdef VECTORIZED
+static_assert(0 && "Generalized nn-gathering currently not compatible with vectorization")
+#endif
+#endif
 
 #ifdef SUBNODE_LAYOUT
 #ifndef VECTOR_SIZE
