@@ -604,10 +604,6 @@ void lattice_struct::create_gen_std_gathers() {
     size_t c_offset = mynode.sites; // current offset in field-arrays
     
     int too_large_node = 0;
-    // We set the communication and the neigbour-array here
-    for (size_t inntopo = 0; inntopo < nn_map.size(); ++inntopo) {
-        gen_comminfol.push_back(std::array<gen_comminfo_struct, NDIRS>());
-        std::array<gen_comminfo_struct, NDIRS> &gen_comminfo=gen_comminfol.back();
 
     // Set communication and determine neigbour-array for each of the defined nn-mappings
     for (size_t inntopo = 0; inntopo < nn_map.size(); ++inntopo) {
