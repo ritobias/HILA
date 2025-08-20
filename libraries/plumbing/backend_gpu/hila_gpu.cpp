@@ -139,8 +139,9 @@ void backend_lattice_struct::setup(lattice_struct &lattice) {
     /* Setup neighbour fields in all directions */
     for (int d = 0; d < NDIRS; d++) {
         // For normal boundaries
-        gpuMalloc(&(d_neighb[d]), lattice.mynode.volume() * sizeof(unsigned));
-        gpuMemcpy(d_neighb[d], lattice.neighb[d], lattice.mynode.volume() * sizeof(unsigned),
+        gpuMalloc(&(d_neighb[d]),
+                  lattice.mynode.volume() * lattice.nn_map.size() * sizeof(unsigned));
+        gpuMemcpy(d_neighb[d], lattice.neighb[d], lattice.mynode.volume() * lattice.nn_map.size() * sizeof(unsigned),
                   gpuMemcpyHostToDevice);
 
 #ifdef SPECIAL_BOUNDARY_CONDITIONS

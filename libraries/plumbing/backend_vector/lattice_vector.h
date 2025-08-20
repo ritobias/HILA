@@ -61,7 +61,7 @@ struct vectorized_lattice_struct {
     /// The storage size of a field
     size_t alloc_size;
     /// A wait array for the vectorized field
-    unsigned char *RESTRICT vec_wait_arr_;
+    dir_mask_t *RESTRICT vec_wait_arr_;
 
     /// Check if this is the first subnode
     bool is_on_first_subnode(CoordinateVector v) {
@@ -113,7 +113,7 @@ struct vectorized_lattice_struct {
         get_boundary_permutations();
 
         for (Direction d = (Direction)0; d < NDIRS; d++) {
-            neighbours[d] = (unsigned *)memalloc(v_sites * sizeof(unsigned));
+            neighbours[d] = (unsigned *)memalloc(v_sites * lattice.nn_map.size() * sizeof(unsigned));
         }
 
         get_neighbours_and_local_halo();
@@ -182,7 +182,7 @@ struct vectorized_lattice_struct {
         // check special case: 1st subnode is across the whole lattice to Direction d and
         // no boundary permutation
         // we do the copy also in this case, in order to implement other boundary
-        // conditions Slows down a bit the periodic case, but with MPI comms this should
+        // conditions. Slows down a bit the periodic case, but with MPI comms this should
         // make no difference
 
         foralldir (d) {

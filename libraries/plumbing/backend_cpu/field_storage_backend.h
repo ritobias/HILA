@@ -38,6 +38,21 @@ void field_storage<T>::free_field() {
 
 
 template <typename T>
+void field_storage<T>::set_field_ref(const lattice_struct &lattice, const field_storage<T> &other) {
+    fieldbuf = other.fieldbuf;
+    if (fieldbuf == nullptr) {
+        std::cout << "Failure in Field memory referencing\n";
+        exit(1);
+    }
+}
+
+template <typename T>
+void field_storage<T>::delete_field_ref() {
+    fieldbuf = nullptr;
+}
+
+
+template <typename T>
 void field_storage<T>::gather_elements(T *RESTRICT buffer, const unsigned *RESTRICT index_list,
                                        int n, const lattice_struct &lattice) const {
 

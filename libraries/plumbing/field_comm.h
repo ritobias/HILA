@@ -287,13 +287,13 @@ dir_mask_t Field<T>::start_gather(Direction d, Parity p) const {
         return 0;
     }
 #else
-    lattice_struct::gen_comminfo_struct &ci = lattice.gen_comminfo[d];
+    lattice_struct::gen_comminfo_struct &ci = lattice.gen_comminfol[fs->nn_topo][d];
     std::vector<lattice_struct::comm_node_struct> &from_nodel = ci.from_node;
     std::vector<lattice_struct::comm_node_struct> &to_nodel = ci.to_node;
     bool ok = true;
-    for (size_t i = 0; i < from_nodel.size(); ++i) {
-        lattice_struct::comm_node_struct &from_node = from_nodel[i];
-        lattice_struct::comm_node_struct &to_node = to_nodel[i];
+    for (size_t inode = 0; inode < from_nodel.size(); ++inode) {
+        lattice_struct::comm_node_struct &from_node = from_nodel[inode];
+        lattice_struct::comm_node_struct &to_node = to_nodel[inode];
 
         if (from_node.rank != hila::myrank() || to_node.rank != hila::myrank()) {
             ok = false;
@@ -573,16 +573,17 @@ void Field<T>::wait_gather(Direction d, Parity p) const {
 
 #else
 
-    lattice_struct::gen_comminfo_struct &ci = lattice.gen_comminfo[d];
+    lattice_struct::gen_comminfo_struct &ci = lattice.gen_comminfol[fs->nn_topo][d];
     std::vector<lattice_struct::comm_node_struct> &from_nodel = ci.from_node;
     std::vector<lattice_struct::comm_node_struct> &to_nodel = ci.to_node;
-    bool ok = true;
-    for (size_t i = 0; i < from_nodel.size(); ++i) {
-        lattice_struct::comm_node_struct &from_node = from_nodel[i];
-        lattice_struct::comm_node_struct &to_node = to_nodel[i];
 
-        // this is the branch if no comms -- shuffle was done in start_gather
-        if (from_node.rank != hila::myrank() || to_node.rank != hila::myrank())
+    // this is the branch if no comms -- shuffle was done in start_gather
+    bool ok = true;
+    for (size_t inode = 0; inode < from_nodel.size(); ++inode) {
+        lattice_struct::comm_node_struct &from_node = from_nodel[inode];
+        lattice_struct::comm_node_struct &to_node = to_nodel[inode];
+
+          if (from_node.rank != hila::myrank() || to_node.rank != hila::myrank())
             ok = false;
     }
     if(ok) {
@@ -632,8 +633,6 @@ void Field<T>::wait_gather(Direction d, Parity p) const {
         for (size_t inode = 0; inode < from_nodel.size(); ++inode) {
             lattice_struct::comm_node_struct &from_node = from_nodel[inode];
             lattice_struct::comm_node_struct &to_node = to_nodel[inode];
-
-
 
             if (from_node.rank != hila::myrank() && boundary_need_to_communicate(d)) {
                 wait_receive_timer.start();

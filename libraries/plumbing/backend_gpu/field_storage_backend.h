@@ -23,6 +23,20 @@ void field_storage<T>::free_field() {
     fieldbuf = nullptr;
 }
 
+template <typename T>
+void field_storage<T>::set_field_ref(const lattice_struct &lattice, const field_storage<T> &other) {
+    fieldbuf = other.fieldbuf;
+    if (fieldbuf == nullptr) {
+        std::cout << "Failure in field memory referencing\n";
+    }
+    assert(fieldbuf != nullptr);
+}
+
+template <typename T>
+void field_storage<T>::delete_field_ref() {
+    fieldbuf = nullptr;
+}
+
 // Only attempt to compile with CUDA compiler.
 // Hilapp will skip these.
 // #if defined(__CUDACC__) || defined(__HIPCC__)

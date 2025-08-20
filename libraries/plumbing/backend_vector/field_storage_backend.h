@@ -81,6 +81,16 @@ void field_storage<T>::free_field() {
     fieldbuf = nullptr;
 }
 
+template <typename T>
+void field_storage<T>::set_field_ref(const lattice_struct &lattice, const field_storage<T> &other) {
+    fieldbuf = other.fieldbuf;
+}
+
+template <typename T>
+void field_storage<T>::delete_field_ref() {
+    fieldbuf = nullptr;
+}
+
 // get and set a full vector T
 
 template <typename T>

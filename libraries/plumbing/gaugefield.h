@@ -50,6 +50,11 @@ class GaugeField {
         foralldir(d) fdir[d] = 0;
     }
 
+    // make this gauge field reference the field content of other gauge field
+    GaugeField(GaugeField &other, int nn_topo) {
+        foralldir(d) fdir[d].make_ref_to(other[d], nn_topo);
+    }
+
 
     /////////////////////////////////////////////////
     /// Destructor
@@ -85,6 +90,16 @@ class GaugeField {
     GaugeField &operator=(const GaugeField<A> &rhs) {
         foralldir(d) fdir[d] = rhs[d];
         return *this;
+    }
+
+    /**
+     * @brief Construct GaugeField that references the field data of other GaugeField but using
+     * different nn-topology
+     * @param other
+     * @param nn_topo
+     */
+    void make_ref_to(GaugeField &other, int nn_topo) {
+        foralldir(d) fdir[d].make_ref_to(other[d], nn_topo);
     }
 
     /**
