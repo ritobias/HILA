@@ -507,7 +507,7 @@ class Field {
         fs->allocate_payload_from_ref(otherfs->payload);
         fs->initialize_communication();
         mark_changed(ALL);   // guarantees communications will be done
-        fs->assigned_to = otherfs->assigned_to; // and this means that it is not assigned
+        fs->assigned_to = 0; // and this means that it is not assigned
 
         for (Direction d = (Direction)0; d < NDIRS; ++d) {
 
@@ -570,7 +570,11 @@ class Field {
      * @return bool
      */
     bool is_initialized(Parity p) const {
-        return fs != nullptr && ((fs->assigned_to & parity_bits(p)) != 0);
+        if(is_ref_of == nullptr) {
+            return fs != nullptr && (((fs->assigned_to & parity_bits(p)) != 0));
+        } else {
+            return is_ref_of->fs != nullptr && (((is_ref_of->fs->assigned_to & parity_bits(p)) != 0));
+        }
     }
 
     /**

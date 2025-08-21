@@ -733,8 +733,11 @@ void lattice_struct::create_gen_std_gathers() {
                     // the following array store for each site that has to be sent to another node
                     // the index it will have on that node. This is needed to ensure that to_node.sitelist
                     // is correctly orderd, which is not automatically the case for non-trivial topologies.
-                    std::vector<unsigned> to_node_es(to_node.evensites);
-                    std::vector<unsigned> to_node_os(to_node.oddsites);
+                    struct idx_pair {
+                        size_t c[2];
+                    };
+                    std::vector<idx_pair> to_node_es(to_node.evensites);
+                    std::vector<idx_pair> to_node_os(to_node.oddsites);
                     size_t in;
                     for (size_t i = 0; i < mynode.sites; ++i) {
                         if (reshuffle_list[i] == from_node.rank) {
@@ -751,8 +754,7 @@ void lattice_struct::create_gen_std_gathers() {
                                 from_node.sitelist[c_even] = i;
 #endif
                                 // flipped parity: this is for odd sends
-                                to_node.sitelist[to_node.evensites + c_even] = i;
-                                to_node_os[c_even] = in;
+                                to_node_os[c_even] = {in, i};
 
                                 ++c_even;
                             } else {
@@ -760,11 +762,10 @@ void lattice_struct::create_gen_std_gathers() {
                                 if (c_offset + from_node.evensites + c_odd >= (1ULL << 32))
                                     too_large_node = 1;
 #ifndef VANILLA
-                                from_node.sitelist[c_odd + from_node.evensites] = i;
+                                from_node.sitelist[from_node.evensites + c_odd] = i;
 #endif
                                 // flipped parity: this is for even sends
-                                to_node.sitelist[c_odd] = i;
-                                to_node_es[c_odd] = in;
+                                to_node_es[c_odd] = {in, i};
 
                                 ++c_odd;
                             }
@@ -773,37 +774,19 @@ void lattice_struct::create_gen_std_gathers() {
                     if(to_node.evensites>0) {
                         // order even site part of to_node.sitelist according to the index of the target
                         // sites on the target node:
-                        unsigned len = to_node.evensites;
-                        std::vector<unsigned> idx(len);
-                        for (size_t i = 0; i < len; ++i) {
-                            idx[i] = i;
-                        }
-                        std::stable_sort(idx.begin(), idx.end(), [&to_node_es](size_t i1, size_t i2) {
-                            return to_node_es[i1] < to_node_es[i2];
-                        });
-                        for (size_t i = 0; i < len; ++i) {
-                            to_node_es[i] = to_node.sitelist[i];
-                        }
-                        for (size_t i = 0; i < len; ++i) {
-                            to_node.sitelist[i] = to_node_es[idx[i]];
+                        std::stable_sort(to_node_es.begin(), to_node_es.end(),
+                                         [](auto i1, auto i2) { return i1.c[0] < i2.c[0]; });
+                        for (size_t i = 0; i < to_node.evensites; ++i) {
+                            to_node.sitelist[i] = to_node_es[i].c[1];
                         }
                     }
                     if(to_node.oddsites>0) {
                         // order odd site part of to_node.sitelist according to the index of the target
                         // sites on the target node:
-                        unsigned len = to_node.oddsites;
-                        std::vector<unsigned> idx(len);
-                        for (size_t i = 0; i < len; ++i) {
-                            idx[i] = i;
-                        }
-                        std::stable_sort(idx.begin(), idx.end(), [&to_node_os](size_t i1, size_t i2) {
-                            return to_node_os[i1] < to_node_os[i2];
-                        });
-                        for (size_t i = 0; i < len; ++i) {
-                            to_node_os[i] = to_node.sitelist[to_node.evensites + i];
-                        }
-                        for (size_t i = 0; i < len; ++i) {
-                            to_node.sitelist[to_node.evensites + i] = to_node_os[idx[i]];
+                        std::stable_sort(to_node_os.begin(), to_node_os.end(),
+                                         [](auto i1, auto i2) { return i1.c[0] < i2.c[0]; });
+                        for (size_t i = 0; i < to_node.evensites; ++i) {
+                            to_node.sitelist[to_node.evensites + i] = to_node_os[i].c[1];
                         }
                     }
                     c_offset += c_even + c_odd;
