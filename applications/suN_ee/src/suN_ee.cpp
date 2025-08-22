@@ -545,6 +545,7 @@ int main(int argc, char **argv) {
             }
         }
     }
+    /*
     if(0) {
         foralldir(d1) {
             foralldir(d2) if(d1 < d2) {
@@ -557,6 +558,7 @@ int main(int argc, char **argv) {
             }
         }
     }
+    */
 
     // use negative trajectory for thermal
     int start_traj = -p.n_therm;
@@ -633,7 +635,7 @@ int main(int argc, char **argv) {
                                << hila::gettime() - gftime << '\n';
 
                     gf_timer.stop();
-                    
+
                 }
 
             }
