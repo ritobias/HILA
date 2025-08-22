@@ -88,21 +88,24 @@ void gather_test() {
                     f1[X] = f[X + d];
                 }
                 // Since (*lattice.nn_map)(l, d) can't be called inside site-loop, we transfer the
-                // field to node 0 (should probably be turned off for large lattices)
-                auto f1l = f1.get_slice({-1, -1, -1, -1});
-                if (hila::myrank() == 0) {
-                    CoordinateVector l, ln;
-                    CoordinateVector dif1 = 0;
-                    for (size_t i = 0; i < lattice.volume(); ++i) {
-                        l = lattice.global_coordinates(i);
-                        ln = (*(lattice.nn_map[inntopo]))(l, d);
-                        dif1 = abs(f1l[i] - ln);
-                        if (dif1.squarenorm() != 0) {
-                            hila::out0 << " gen std up-gather test error! Node " << lattice.node_rank(l)
-                                    << " direction " << (unsigned)d << " (to node "
-                                    << lattice.node_rank(ln) << ")" << " dif1=(" << dif1 << ") l=("
-                                    << l << ") ln=(" << ln << ") f1l=(" << f1l[i] << ")" << '\n';
-                            terminate = true;
+                // field to node 0
+                size_t svol = lattice.volume() / lattice.size(e_t);
+                for (int it = 0; it < lattice.size(e_t); ++it) {
+                    auto f1l = f1.get_slice({-1, -1, -1, it});
+                    if (hila::myrank() == 0) {
+                        CoordinateVector l, ln;
+                        CoordinateVector dif1 = 0;
+                        for (size_t i = 0; i < svol; ++i) {
+                            l = lattice.global_coordinates(it * svol + i);
+                            ln = (*(lattice.nn_map[inntopo]))(l, d);
+                            dif1 = abs(f1l[i] - ln);
+                            if (dif1.squarenorm() != 0) {
+                                hila::out0 << " gen std up-gather test error! Node " << lattice.node_rank(l)
+                                        << " direction " << (unsigned)d << " (to node "
+                                        << lattice.node_rank(ln) << ")" << " dif1=(" << dif1 << ") l=("
+                                        << l << ") ln=(" << ln << ") f1l=(" << f1l[i] << ")" << '\n';
+                                terminate = true;
+                            }
                         }
                     }
                 }
@@ -112,21 +115,24 @@ void gather_test() {
                 onsites(ALL) {
                     f2[X] = f[X - d];
                 }
-                auto f2l = f2.get_slice({-1, -1, -1, -1});
-                if (hila::myrank() == 0) {
-                    CoordinateVector l, ln;
-                    CoordinateVector dif2 = 0;
-                    for (size_t i = 0; i < lattice.volume(); ++i) {
-                        l = lattice.global_coordinates(i);
-                        ln = (*(lattice.nn_map[inntopo]))(l, -d);
-                        dif2 = abs(f2l[i] - ln);
-                        if (dif2.squarenorm() != 0) {
-                            hila::out0 << " gen std down-gather test error! Node "
-                                    << lattice.node_rank(l) << " direction " << (unsigned)d
-                                    << " (to node " << lattice.node_rank(ln) << ")" << " dif2=("
-                                    << dif2 << ") l=(" << l << ") ln=(" << ln << ") f2l=(" << f2l[i]
-                                    << ")" << '\n';
-                            terminate = true;
+                size_t svol = lattice.volume() / lattice.size(e_t);
+                for (int it = 0; it < lattice.size(e_t); ++it) {
+                    auto f2l = f2.get_slice({-1, -1, -1, it});
+                    if (hila::myrank() == 0) {
+                        CoordinateVector l, ln;
+                        CoordinateVector dif2 = 0;
+                        for (size_t i = 0; i < svol; ++i) {
+                            l = lattice.global_coordinates(it * svol + i);
+                            ln = (*(lattice.nn_map[inntopo]))(l, -d);
+                            dif2 = abs(f2l[i] - ln);
+                            if (dif2.squarenorm() != 0) {
+                                hila::out0 << " gen std down-gather test error! Node "
+                                           << lattice.node_rank(l) << " direction " << (unsigned)d
+                                           << " (to node " << lattice.node_rank(ln) << ")"
+                                           << " dif2=(" << dif2 << ") l=(" << l << ") ln=(" << ln
+                                           << ") f2l=(" << f2l[i] << ")" << '\n';
+                                terminate = true;
+                            }
                         }
                     }
                 }
@@ -154,21 +160,24 @@ void gather_test() {
                 }
                 // Since (*lattice.nn_map)(l, d) can't be called inside site-loop, we transfer the
                 // field to node 0 (should probably be turned off for large lattices)
-                auto f1l = f1.get_slice({-1, -1, -1, -1});
-                if (hila::myrank() == 0) {
-                    CoordinateVector l, ln;
-                    CoordinateVector dif1 = 0;
-                    for (size_t i = 0; i < lattice.volume(); ++i) {
-                        l = lattice.global_coordinates(i);
-                        ln = (*(lattice.nn_map[0]))(l, d);
-                        dif1 = abs(f1l[i] - ln);
-                        if (dif1.squarenorm() != 0) {
-                            hila::out0 << " gen std up-gather test error! Node "
-                                       << lattice.node_rank(l) << " direction " << (unsigned)d
-                                       << " (to node " << lattice.node_rank(ln) << ")" << " dif1=("
-                                       << dif1 << ") l=(" << l << ") ln=(" << ln << ") f1l=("
-                                       << f1l[i] << ")" << '\n';
-                            terminate = true;
+                size_t svol = lattice.volume() / lattice.size(e_t);
+                for (int it = 0; it < lattice.size(e_t); ++it) {
+                    auto f1l = f1.get_slice({-1, -1, -1, it});
+                    if (hila::myrank() == 0) {
+                        CoordinateVector l, ln;
+                        CoordinateVector dif1 = 0;
+                        for (size_t i = 0; i < svol; ++i) {
+                            l = lattice.global_coordinates(it * svol + i);
+                            ln = (*(lattice.nn_map[0]))(l, d);
+                            dif1 = abs(f1l[i] - ln);
+                            if (dif1.squarenorm() != 0) {
+                                hila::out0 << " gen std up-gather test error! Node "
+                                        << lattice.node_rank(l) << " direction " << (unsigned)d
+                                        << " (to node " << lattice.node_rank(ln) << ")" << " dif1=("
+                                        << dif1 << ") l=(" << l << ") ln=(" << ln << ") f1l=("
+                                        << f1l[i] << ")" << '\n';
+                                terminate = true;
+                            }
                         }
                     }
                 }
@@ -178,21 +187,24 @@ void gather_test() {
                 onsites(ALL) {
                     f2[X] = rf[X - d];
                 }
-                auto f2l = f2.get_slice({-1, -1, -1, -1});
-                if (hila::myrank() == 0) {
-                    CoordinateVector l, ln;
-                    CoordinateVector dif2 = 0;
-                    for (size_t i = 0; i < lattice.volume(); ++i) {
-                        l = lattice.global_coordinates(i);
-                        ln = (*(lattice.nn_map[0]))(l, -d);
-                        dif2 = abs(f2l[i] - ln);
-                        if (dif2.squarenorm() != 0) {
-                            hila::out0 << " gen std down-gather test error! Node "
-                                       << lattice.node_rank(l) << " direction " << (unsigned)d
-                                       << " (to node " << lattice.node_rank(ln) << ")" << " dif2=("
-                                       << dif2 << ") l=(" << l << ") ln=(" << ln << ") f2l=("
-                                       << f2l[i] << ")" << '\n';
-                            terminate = true;
+                size_t svol = lattice.volume() / lattice.size(e_t);
+                for (int it = 0; it < lattice.size(e_t); ++it) {
+                    auto f2l = f2.get_slice({-1, -1, -1, it});
+                    if (hila::myrank() == 0) {
+                        CoordinateVector l, ln;
+                        CoordinateVector dif2 = 0;
+                        for (size_t i = 0; i < svol; ++i) {
+                            l = lattice.global_coordinates(it * svol + i);
+                            ln = (*(lattice.nn_map[0]))(l, -d);
+                            dif2 = abs(f2l[i] - ln);
+                            if (dif2.squarenorm() != 0) {
+                                hila::out0 << " gen std down-gather test error! Node "
+                                           << lattice.node_rank(l) << " direction " << (unsigned)d
+                                           << " (to node " << lattice.node_rank(ln) << ")"
+                                           << " dif2=(" << dif2 << ") l=(" << l << ") ln=(" << ln
+                                           << ") f2l=(" << f2l[i] << ")" << '\n';
+                                terminate = true;
+                            }
                         }
                     }
                 }

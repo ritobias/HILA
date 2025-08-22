@@ -21,7 +21,7 @@ using mygroup = SU<NCOLOR, ftype>;
 struct parameters {
     ftype beta;         // inverse gauge coupling
     int s;              // number of replicas
-    ftype l;              // entangling region slab width
+    ftype l;            // entangling region slab width
     int n_traj;         // number of trajectories to generate
     int n_therm;        // number of thermalization trajectories (counts only accepted traj.)
     int n_update;       // number of heat-bath sweeps per "trajectory"
