@@ -300,6 +300,12 @@ class CoordinateVector_t : public Vector<NDIM, T> {
         foralldir(d) this->e(d) = v.e(d);
     }
 
+    // construct from std::vector
+    inline CoordinateVector_t(const std::vector<T> &v) {
+        assert(v.size() == NDIM && "CoordinateVector initialization std::vector has wrong size");
+        foralldir(d) this->e(d) = v[d];
+    }
+
     /// Construct CV automatically from right-size initializer list
     /// This does not seem to be dangerous, so keep non-explicit
     template <typename S, std::enable_if_t<hila::is_assignable<T &, S>::value, int> = 0>
@@ -331,7 +337,7 @@ class CoordinateVector_t : public Vector<NDIM, T> {
         foralldir(d) this->e(d) = v[d];
         return *this;
     }
-    
+
     /// Assign from 0
     inline CoordinateVector_t &operator=(std::nullptr_t z) out_only & {
         foralldir(d) this->e(d) = 0;

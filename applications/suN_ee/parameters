@@ -3,10 +3,10 @@
 lattice size           16,15,15,16
 beta                   11.
 replica number         2
-slab width             3
+slab width             2.5
 number of trajectories 110
-updates in trajectory  10
-overrelax steps        10
+updates in trajectory  5
+overrelax steps        5
 thermalization trajs   10
 gflow freq             0
 gflow max lambda       0.

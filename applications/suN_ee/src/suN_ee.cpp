@@ -1,5 +1,5 @@
 #include "hila.h"
-#include "gauge/staples.h"
+#include "wilson_plaquette_action_ee.h"
 #include "gauge/sun_heatbath.h"
 #include "gauge/sun_overrelax.h"
 #include "gauge/gradient_flow.h"
@@ -7,6 +7,7 @@
 #include "tools/floating_point_epsilon.h"
 #include "gauge/sun_max_staple_sum_rot.h"
 #include "gauge/polyakov.h"
+#include <algorithm>
 
 #ifndef NCOLOR
 #define NCOLOR 3
@@ -38,22 +39,117 @@ struct parameters {
 ///////////////////////////////////////////////////////////////////////////////////
 // heat-bath functions
 
+
+/**
+ * @brief Sum the staples of link matrices to direction dir taking into account plaquette weights
+ *
+ * Naive method is to compute:
+ *
+ * \code {.cpp}
+ * foralldir(d2) if (d2 != d1)
+ *     stapes[par] += U[d2][X]*U[d1][X+d2]*U[d2][X+d1].dagger()  +
+ *                    U[d2][X-d2].dagger()*U[d1][X-d2]*U[d2][X-d2+d1]
+ * \endcode
+ *
+ * But the method is computed in a slightly more optimized way
+ *
+ * @tparam T gaug field type
+ * @tparam pT type of plaq_tbc_mode
+ * @param U[2] GaugeField for the two different nn-topologies
+ * @param plaq_tbc_mode PlaquetteField specifying nn-topology to be used to compute plaquettes
+ * @param staples Filed to compute staplesum into at each lattice point
+ * @param d1 Direction to compute staplesum for
+ * @param par Parity to compute staplesum for
+ * @param bcmode flag that controls whether plaquettes with paq_tbc_mode = 2 should be treated
+ * as 1 or 0 . (if bcmode = -1 (default), they are treated as 0)
+ */
+template <typename T, typename pT, typename atype = hila::arithmetic_type<T>>
+void staplesum(const GaugeField<T> (&U)[2], const PlaquetteField<pT> &plaq_tbc_mode,
+               out_only Field<T> &staples, Direction d1, Parity par = ALL, atype alpha = 0.0) {
+
+    Field<T> lower[2];
+    lower[1].set_nn_topo(1);
+    bool first = true;
+    foralldir(d2) if (d2 != d1) {
+
+        U[0][d1].start_gather(d2, par);
+        U[1][d1].start_gather(d2, par);
+ 
+        // calculate first lower 'U' of the staple sum
+        // do it on opp parity
+        onsites(opp_parity(par)) {
+            int ip = plaq_tbc_mode[d1][d2][X];
+            if(ip == 1) {
+                lower[1][X] = U[1][d2][X].dagger() * U[1][d1][X] * U[1][d2][X + d1];
+            } else if(ip == 2) {
+                lower[1][X] = U[1][d2][X].dagger() * U[1][d1][X] * U[1][d2][X + d1];
+                lower[0][X] = U[0][d2][X].dagger() * U[0][d1][X] * U[0][d2][X + d1];
+            } else {
+                lower[0][X] = U[0][d2][X].dagger() * U[0][d1][X] * U[0][d2][X + d1];
+            }
+        }
+
+        // calculate then the upper 'n', and add the lower
+        // lower could also be added on a separate loop
+        if (first) {
+            onsites(par) {
+                int ip = plaq_tbc_mode[d1][d2][X];
+                if (ip == 1) {
+                    staples[X] = (U[1][d2][X] * U[1][d1][X + d2] * U[1][d2][X + d1].dagger()) +
+                                 lower[1][X - d2];
+                } else if(ip == 2) {
+                    staples[X] =
+                        (1.0 - alpha) *
+                            (U[0][d2][X] * U[0][d1][X + d2] * U[0][d2][X + d1].dagger() + lower[0][X - d2]) +
+                        alpha * (U[1][d2][X] * U[1][d1][X + d2] * U[1][d2][X + d1].dagger() + lower[1][X - d2]);
+
+                } else {
+                    staples[X] = (U[0][d2][X] * U[0][d1][X + d2] * U[0][d2][X + d1].dagger()) +
+                                 lower[0][X - d2];
+                }
+            }
+            first = false;
+        } else {
+            onsites(par) {
+                int ip = plaq_tbc_mode[d1][d2][X];
+                if (ip == 1) {
+                    staples[X] += (U[1][d2][X] * U[1][d1][X + d2] * U[1][d2][X + d1].dagger()) +
+                                 lower[1][X - d2];
+                } else if (ip == 2) {
+                    staples[X] +=
+                        (1.0 - alpha) *
+                            (U[0][d2][X] * U[0][d1][X + d2] * U[0][d2][X + d1].dagger() +
+                             lower[0][X - d2]) +
+                        alpha * (U[1][d2][X] * U[1][d1][X + d2] * U[1][d2][X + d1].dagger() +
+                                 lower[1][X - d2]);
+
+                } else {
+                    staples[X] += (U[0][d2][X] * U[0][d1][X + d2] * U[0][d2][X + d1].dagger()) +
+                                 lower[0][X - d2];
+                }
+            }
+        }
+    }
+}
+
 /**
  * @brief Wrapper function to updated GaugeField per direction
  * @details Computes first staplesum, then uses computed result to evolve GaugeField either with
  * over relaxation or heat bath
  *
- * @tparam group
- * @param U GaugeField to evolve
- * @param p parameter struct
- * @param par Parity
- * @param d Direction to evolve
- * @param relax If true evolves GaugeField with over relaxation if false then with heat bath
- * @param plaqw plaquette weights
+ * @tparam T gaug field type
+ * @tparam pT type of plaq_tbc_mode
+ * @param U[2] GaugeField for the two different nn-topologies
+ * @param plaq_tbc_mode PlaquetteField specifying nn-topology to be used to compute plaquettes
+ * @param p parameters
+ * @param d Direction specifies to update links in direction d
+ * @param par Parity specifies parity of links to be updated
+ * @param relax bool specifies whether
+ * to update with overrelaxation (or heatbath)
  */
-template <typename group>
-void update_parity_dir(GaugeField<group> &U, const parameters &p, Parity par, Direction d,
-                       bool relax, const plaqw_t<ftype> &plaqw) {
+template <typename T, typename pT, typename atype = hila::arithmetic_type<T>>
+void update_parity_dir(GaugeField<T> (&U)[2], const PlaquetteField<pT> &plaq_tbc_mode,
+                       const parameters &p, Direction d, Parity par, bool relax, atype alpha = 0) {
 
     static hila::timer hb_timer("Heatbath");
     static hila::timer or_timer("Overrelax");
@@ -61,11 +157,11 @@ void update_parity_dir(GaugeField<group> &U, const parameters &p, Parity par, Di
 
     double accr = 0.0;
 
-    Field<group> staples;
+    Field<T> staples;
 
     staples_timer.start();
 
-    staplesum(U, staples, d, plaqw, par);
+    staplesum(U, plaq_tbc_mode, staples, d, par, alpha);
 
     staples_timer.stop();
 
@@ -74,14 +170,12 @@ void update_parity_dir(GaugeField<group> &U, const parameters &p, Parity par, Di
         or_timer.start();
 
         onsites(par) {
-            if(plaqw[d][d][X] != 0) {
 #ifdef SUN_OVERRELAX_dFJ
-                suN_overrelax_dFJ(U[d][X], staples[X], p.beta);
+            suN_overrelax_dFJ(U[0][d][X], staples[X], p.beta);
 #else
-                //suN_overrelax(U[d][X], staples[X]);
-                suN_overrelax(U[d][X], staples[X], p.beta);
+            //suN_overrelax(U[0][d][X], staples[X]);
+            suN_overrelax(U[0][d][X], staples[X], p.beta);
 #endif
-            }
         }
         or_timer.stop();
 
@@ -89,9 +183,7 @@ void update_parity_dir(GaugeField<group> &U, const parameters &p, Parity par, Di
 
         hb_timer.start();
         onsites(par) {
-            if (plaqw[d][d][X] != 0) {
-                suN_heatbath(U[d][X], staples[X], p.beta);
-            }
+            suN_heatbath(U[0][d][X], staples[X], p.beta);
         }
         hb_timer.stop();
 
@@ -102,156 +194,71 @@ void update_parity_dir(GaugeField<group> &U, const parameters &p, Parity par, Di
  * @brief Wrapper update function
  * @details Gauge Field update sweep with randomly chosen parities and directions
  *
- * @tparam group
- * @param U GaugeField to update
- * @param p Parameter struct
- * @param plaqw plaquette weights
+ * @tparam T gaug field type
+ * @tparam pT type of plaq_tbc_mode
+ * @param U[2] GaugeField for the two different nn-topologies
+ * @param plaq_tbc_mode PlaquetteField specifying nn-topology to be used to compute plaquettes
+ * @param p parameters
  */
-template <typename group>
-void update(GaugeField<group> &U, const parameters &p, const plaqw_t<ftype> &plaqw) {
+template <typename T, typename pT, typename atype = hila::arithmetic_type<T>>
+void update(GaugeField<T> (&U)[2], const PlaquetteField<pT> &plaq_tbc_mode, const parameters &p, atype alpha = 0) {
     for (int i = 0; i < 2 * NDIM; ++i) {
         int tdp = hila::broadcast((int)(hila::random() * 2 * NDIM));
         int tdir = tdp / 2;
         int tpar = 1 + (tdp % 2);
         bool relax = hila::broadcast((int)(hila::random() * (p.n_update + p.n_overrelax)) >= p.n_update);
-        // hila::out0 << "   " << Parity(tpar) << " -- " << Direction(tdir);
-        update_parity_dir(U, p, Parity(tpar), Direction(tdir), relax, plaqw);
+        update_parity_dir(U, plaq_tbc_mode, p, Direction(tdir), Parity(tpar), relax, alpha);
     }
-    // hila::out0 << "\n";
 }
 
 /**
  * @brief Evolve gauge field
- * @details Evolution happens by means of heat bath and overrelaxation. For each heatbath update
- * (p.n_update) we do on average also p.n_overrelax overrelaxation updates.
+ * @details Evolution happens by means of heat bath and overrelaxation. We do on average
+ * p.n_update heatbath updates and p.n_overrelax overrelaxation updates on each link per sweep.
  *
- * @tparam group
- * @param U
- * @param p
+ * @tparam T gaug field type
+ * @tparam pT type of plaq_tbc_mode
+ * @param U[2] GaugeField for the two different nn-topologies
+ * @param plaq_tbc_mode PlaquetteField specifying nn-topology to be used to compute plaquettes
+ * @param p parameters
  */
-template <typename group>
-void do_trajectory(GaugeField<group> &U, const plaqw_t<ftype> &plaqw, const parameters &p) {
+template <typename T, typename pT, typename atype = hila::arithmetic_type<T>>
+void do_trajectory(GaugeField<T> (&U)[2], const PlaquetteField<pT> &plaq_tbc_mode,
+                   const parameters &p, atype alpha = 0) {
     for (int n = 0; n < p.n_update; n++) {
         for (int i = 0; i <= p.n_overrelax; i++) {
-            update(U, p, plaqw);
+            update(U, plaq_tbc_mode, p, alpha);
             //hila::out0 << relax << "\n";
         }
     }
-    U.reunitarize_gauge();
+    U[0].reunitarize_gauge();
 }
 
 // heat-bath functions
 ///////////////////////////////////////////////////////////////////////////////////
 // measurement functions
 
-template <typename group>
-std::vector<double> measure_s_wplaq_ps(const GaugeField<group> &U, Direction obd,
-                                       const plaqw_t<ftype> &plaqw) {
-    // measure the total Wilson plaquette action for the gauge field U
-    int obdlsize = lattice.size(obd);
-    ReductionVector<double> plaql(obdlsize);
-    plaql = 0.0;
-    plaql.allreduce(false).delayed(true);
-    double normf = 2.0 / (NDIM * (NDIM - 1) * lattice.volume() / obdlsize);
-
-    foralldir(dir1) foralldir(dir2) if (dir1 < dir2) {
-        U[dir2].start_gather(dir1, ALL);
-        U[dir1].start_gather(dir2, ALL);
-        onsites(ALL) {
-            double tplq = (1.0 - real(trace(U[dir1][X] * U[dir2][X + dir1] *
-                                            (U[dir2][X] * U[dir1][X + dir2]).dagger())) /
-                                     group::size()) *
-                          plaqw[dir1][dir2][X] * normf;
-            int obdind = X.coordinate(obd);
-            if (dir1 != obd && dir2 != obd) {
-                plaql[obdind] += tplq;
-            } else {
-                if (obdind > 0 && obdind < obdlsize - 1) {
-                    if (obdind == 1) {
-                        plaql[obdind] += tplq;
-                        plaql[obdind + 1] += 0.5 * tplq;
-                    } else if (obdind == obdlsize - 2) {
-                        plaql[obdind] += 0.5 * tplq;
-                        plaql[obdind + 1] += tplq;
-                    } else {
-                        plaql[obdind] += 0.5 * tplq;
-                        plaql[obdind + 1] += 0.5 * tplq;
-                    }
-                }
-            }
-        }
-    }
-    plaql.reduce();
-    return plaql.vector();
-}
-
-/**
- * @brief Measure Polyakov lines to direction dir
- * @details Naive implementation, includes extra communication
- * @tparam T GaugeField Group
- * @param U GaugeField to measure
- * @param dir Direction
- * @return Complex<double>
- */
-template <typename T>
-std::vector<Complex<double>> measure_polyakov_ps(const GaugeField<T> &U, Direction obd,
-                                                 Direction dir = Direction(NDIM - 1)) {
-
-    Field<T> polyakov = U[dir];
-
-    // mult links so that polyakov[X.dir == 0] contains the polyakov loop
-    for (int plane = lattice.size(dir) - 2; plane >= 0; plane--) {
-
-        // safe_access(polyakov) pragma allows the expression below, otherwise
-        // hilapp would reject it because X and X+dir can refer to the same
-        // site on different "iterations" of the loop.  However, here this
-        // is restricted on single dir-plane so it works but we must tell it to hilapp.
-
-#pragma hila safe_access(polyakov)
-        onsites(ALL) {
-            if (X.coordinate(dir) == plane) {
-                polyakov[X] = U[dir][X] * polyakov[X + dir];
-            }
-        }
-    }
-
-    ReductionVector<Complex<double>> ploopl(lattice.size(obd));
-    ploopl = 0.0;
-    ploopl.allreduce(false).delayed(true);
-
-    int obdlsize = lattice.size(obd);
-    double normf = 1.0 / (lattice.volume() / (lattice.size(dir) * obdlsize));
-
-    onsites(ALL) if (X.coordinate(dir) == 0) {
-        ploopl[X.coordinate(obd)] += trace(polyakov[X]) * normf;
-    }
-    ploopl.reduce();
-
-    return ploopl.vector();
-}
-
-template <typename group>
-void measure_stuff(const GaugeField<group> &U, const plaqw_t<ftype> &plaqw) {
+template <typename T, typename pT>
+void measure_stuff(const GaugeField<T> (&U)[2], const PlaquetteField<pT> &plaq, const parameters &p) {
     // perform measurements on current gauge and momentum pair (U, E) and
     // print results in formatted form to standard output
     static bool first = true;
     if (first) {
         // print legend for measurement output
-        hila::out0 << "LMEAS:        plaq        P.real        P.imag\n";
+        hila::out0 << "LMEAS:        plaq\n";
         first = false;
     }
-    auto plaq = measure_s_wplaq(U) / (lattice.volume() * NDIM * (NDIM - 1) / 2);
-    auto poly = measure_polyakov(U, e_t);
-    hila::out0 << string_format("MEAS % 0.6e % 0.6e % 0.6e", plaq, poly.real(), poly.imag())
-            << '\n';
+    auto plaqs = measure_s_wplaq(U, plaq) / (lattice.volume() * NDIM * (NDIM - 1) / 2);
+    auto dplaqs = measure_ds_wplaq_dbcms(U, plaq) / (p.s * (NDIM - 1));
+    hila::out0 << string_format("MEAS % 0.6e % 0.6e", plaqs, dplaqs) << '\n';
 }
 
 // end measurement functions
 ///////////////////////////////////////////////////////////////////////////////////
 // load/save config functions
 
-template <typename group>
-void checkpoint(const GaugeField<group> &U, int trajectory, const parameters &p) {
+template <typename T>
+void checkpoint(const GaugeField<T> &U, int trajectory, const parameters &p) {
     double t = hila::gettime();
     // name of config with extra suffix
     std::string config_file =
@@ -274,8 +281,8 @@ void checkpoint(const GaugeField<group> &U, int trajectory, const parameters &p)
     hila::timestamp(msg.str().c_str());
 }
 
-template <typename group>
-bool restore_checkpoint(GaugeField<group> &U, int &trajectory, parameters &p) {
+template <typename T>
+bool restore_checkpoint(GaugeField<T> &U, int &trajectory, parameters &p) {
     uint64_t seed;
     bool ok = true;
     p.time_offset = 0;
@@ -374,6 +381,25 @@ public:
     }
 };
 
+template <typename bT>
+CoordinateVector bcms_coordinates(bT bcms, const Field<bT> &bcmsid) {
+    Reduction<int> c = 0;
+    c.allreduce(true).delayed(true);
+    CoordinateVector cres;
+    for (Direction d = e_x; d < NDIM - 1; ++d) {
+        c = 0;
+        onsites(ALL) {
+            if (bcmsid[X] == bcms && X.t() == lattice.size(e_t) - 1) {
+                c += X.coordinate(d);
+            }
+        }
+        cres[d] = c.value();
+    }
+    cres[e_t] = 0;
+    return cres;
+}
+
+
 int main(int argc, char **argv) {
 
     // hila::initialize should be called as early as possible
@@ -434,13 +460,16 @@ int main(int argc, char **argv) {
 
     par.close(); // file is closed also when par goes out of scope
 
+    if(p.s<=1) {
+        hila::out0 << "Error: replica number s must be larger than 1. Current value is s=" << p.s << "\n";
+        hila::terminate(1);
+    }
 
-    // specify boundary conditions
-    u_nn_map_t nn_map1(lsize, 2);
+    // specify nearest neighbor topologies (needs to be done before calling lattice.setup())
+    u_nn_map_t nn_map0(lsize, p.s);
+    lattice.nn_map.push_back(&nn_map0);
+    u_nn_map_t nn_map1(lsize, 1);
     lattice.nn_map.push_back(&nn_map1);
-
-    u_nn_map_t nn_map2(lsize, 1);
-    lattice.nn_map.push_back(&nn_map2);
 
     // set up the lattice
     lattice.setup(lsize);
@@ -448,17 +477,80 @@ int main(int argc, char **argv) {
     // We need random number here
     hila::seed_random(seed);
 
-    // Alloc gauge field and momenta (E)
-    GaugeField<mygroup> U[2];
-    U[1].make_ref_to(U[0], 1);
-    VectorField<Algebra<mygroup>> E[2];
-    E[1].make_ref_to(E[0], 1);
+    size_t Vs = lattice.volume()/lattice.size(3); // spatial lattice volume
+    size_t Ae = Vs / lattice.size(0); // area of y-z-plane (~area of connected component of entangling surface)
 
-    plaqw_t<ftype> plaqw;
-    foralldir(d1) {
-        foralldir(d2) {
+    size_t bcms = (size_t)(p.l * (ftype)Ae);
+
+    Field<size_t> bcmsid = 0;
+    bcmsid.set_nn_topo(1); // full e_t-periodicity to distribute spatial bcmsid to all time slices
+    {
+        // assigne spatial bcmsid to each spatial site at e_t=0:
+        CoordinateVector c = {0, 0, 0, 0};
+        for (size_t i = 0; i < Vs; ++i) {
+            bcmsid[c] = i;
+            c = nn_map1(c, e_y);
+        }
+
+        // copy bcmsid from e_t=0 to remaining time slices:
+        for (size_t i = 1; i < lattice.size(3); ++i) {
+#pragma hila safe_access(bcmsid)
             onsites(ALL) {
-                plaqw[d1][d2][X] = 1.0;
+                if(X.t() == i) {
+                    bcmsid[X] = bcmsid[X - e_t];
+                }
+            }
+        }
+    }
+
+    // get coordinates of spatial site with bcmsid = bcms:
+    auto bcmsc = bcms_coordinates(bcms, bcmsid);
+    //hila::out << "rank " << hila::myrank() << "  : bcmsc=(" << bcmsc << ")\n";
+
+    // plaquette field indicating whether a plaquette belongs to region A (value 1) 
+    // or region B (value 0)
+    PlaquetteField<int> plaq_tbc_mode;
+    foralldir(d1) {
+        onsites(ALL) plaq_tbc_mode[d1][d1][X] = -1;
+        foralldir(d2) if(d2 != d1) {
+            onsites(ALL) {
+                int bid0 = bcmsid[X];
+                int bid1 = bcmsid[X + d1];
+                int bid2 = bcmsid[X + d2];
+                if (bid0 <= bcms && bid1 <= bcms && bid2 <= bcms) {
+                    // plaquette belongs to region A
+                    plaq_tbc_mode[d1][d2][X] = 1;
+                } else {
+                    // plaquette belongs to region B
+                    plaq_tbc_mode[d1][d2][X] = 0;
+                }
+            }
+        }
+    }
+    {
+        // mark the temporal plaquettes (value 2) that would be affected when the spatial site with
+        // bcmsid equal to bcms + 1 were moved from region B to region A:
+        CoordinateVector c, cc;
+        for (int it = 0; it < lattice.size(e_t); ++it) {
+            c = nn_map1({bcmsc[0], bcmsc[1], bcmsc[2], it}, e_y);
+            if (nn_map1(c, e_t) != nn_map0(c, e_t)) {
+                foralldir(d1) if (d1 != e_t) {
+                    cc = nn_map0(c, opp_dir(d1));
+                    plaq_tbc_mode[d1][e_t][cc] = 2;
+                    plaq_tbc_mode[e_t][d1][cc] = 2;
+                }
+            }
+        }
+    }
+    if(0) {
+        foralldir(d1) {
+            foralldir(d2) if(d1 < d2) {
+                onsites(ALL) {
+                    if(plaq_tbc_mode[d1][d2][X] == 2) {
+                        hila::out << "X=(" << X.coordinates() << "), d1=" << d1 << ", d2=" << d2
+                                << "\n";
+                    }
+                }
             }
         }
     }
@@ -466,9 +558,14 @@ int main(int argc, char **argv) {
     // use negative trajectory for thermal
     int start_traj = -p.n_therm;
 
+    // Alloc gauge field (U) and gauge momentum field (E)
+    GaugeField<mygroup> U[2];
     if (!restore_checkpoint(U[0], start_traj, p)) {
         U[0] = 1;
     }
+    U[1].make_ref_to(U[0], 1);
+    VectorField<Algebra<mygroup>> E[2];
+    E[1].make_ref_to(E[0], 1);
 
 
     hila::timer update_timer("Updates");
@@ -482,7 +579,7 @@ int main(int argc, char **argv) {
 
         update_timer.start();
 
-        do_trajectory(U[0], plaqw, p);
+        do_trajectory(U, plaq_tbc_mode, p);
 
         // put sync here in order to get approx gpu timing
         hila::synchronize_threads();
@@ -492,7 +589,7 @@ int main(int argc, char **argv) {
 
         hila::out0 << "Measure_start " << trajectory << '\n';
 
-        measure_stuff(U[0], plaqw);
+        measure_stuff(U, plaq_tbc_mode, p);
 
         hila::out0 << "Measure_end " << trajectory << '\n';
 
