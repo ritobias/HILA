@@ -7,20 +7,6 @@
 #include "tools/floating_point_epsilon.h"
 
 
-template <typename T,
-          std::enable_if_t<hila::is_std_array<T>::value || hila::is_std_vector<T>::value, int> = 0>
-void shuffle(T &arr) {
-    // go backwards in array, swap with random earlier element incl. itself
-    for (int j = arr.size() - 1; j > 0; j--) {
-        int i = (j + 1) * hila::random(); // rand from 0 to j inclusive
-        if (i != j) {
-            auto temp = arr[i];
-            arr[i] = arr[j];
-            arr[j] = temp;
-        }
-    }
-}
-
 /**
  * @brief Find \f$ SU(N) \f$ matrix U that maximizes ReTr(U*staple) for given staple
  *
@@ -37,10 +23,17 @@ SU<N, T> suN_max_staple_sum_rot(const SU<N, T> &staple) {
 
     // get a random permutation of the list of possible matrix indices
     std::array<int, N> tperm;
-    for (int i = 0; i < tperm.size(); ++i) {
+    for (int i = 0; i < N; ++i) {
         tperm[i] = i;
     }
-    shuffle(tperm);
+    for (int j = N - 1; j > 0; j--) {
+        int i = (j + 1) * hila::random(); // rand from 0 to j inclusive
+        if (i != j) {
+            int temp = tperm[i];
+            tperm[i] = tperm[j];
+            tperm[j] = temp;
+        }
+    }
 
     // run thourgh the different SU(2) subgroups of SU(N) (in the order given by the permuatation
     // iperm), to build up the SU(N) matrix that that has maximum overlap with l0:
