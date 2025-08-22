@@ -148,7 +148,7 @@ void staplesum(const GaugeField<T> (&U)[2], const PlaquetteField<pT> &plaq_tbc_m
  * to update with overrelaxation (or heatbath)
  */
 template <typename T, typename pT, typename atype = hila::arithmetic_type<T>>
-void update_parity_dir(GaugeField<T> (&U)[2], const PlaquetteField<pT> &plaq_tbc_mode,
+void hb_update_parity_dir(GaugeField<T> (&U)[2], const PlaquetteField<pT> &plaq_tbc_mode,
                        const parameters &p, Direction d, Parity par, bool relax, atype alpha = 0) {
 
     static hila::timer hb_timer("Heatbath");
@@ -201,13 +201,19 @@ void update_parity_dir(GaugeField<T> (&U)[2], const PlaquetteField<pT> &plaq_tbc
  * @param p parameters
  */
 template <typename T, typename pT, typename atype = hila::arithmetic_type<T>>
-void update(GaugeField<T> (&U)[2], const PlaquetteField<pT> &plaq_tbc_mode, const parameters &p, atype alpha = 0) {
+void hb_update(GaugeField<T> (&U)[2], const PlaquetteField<pT> &plaq_tbc_mode, const parameters &p,
+               atype alpha = 0) {
     for (int i = 0; i < 2 * NDIM; ++i) {
+        // randomly choose a parity and a direction:
         int tdp = hila::broadcast((int)(hila::random() * 2 * NDIM));
         int tdir = tdp / 2;
         int tpar = 1 + (tdp % 2);
-        bool relax = hila::broadcast((int)(hila::random() * (p.n_update + p.n_overrelax)) >= p.n_update);
-        update_parity_dir(U, plaq_tbc_mode, p, Direction(tdir), Parity(tpar), relax, alpha);
+        // randomly choose whether to do overrelaxation or heatbath update (with probabilities
+        // according to specified p.n_update and p.n_overrelax):
+        bool relax =
+            hila::broadcast((int)(hila::random() * (p.n_update + p.n_overrelax)) >= p.n_update);
+        // perform the selected updates:
+        hb_update_parity_dir(U, plaq_tbc_mode, p, Direction(tdir), Parity(tpar), relax, alpha);
     }
 }
 
@@ -223,10 +229,10 @@ void update(GaugeField<T> (&U)[2], const PlaquetteField<pT> &plaq_tbc_mode, cons
  * @param p parameters
  */
 template <typename T, typename pT, typename atype = hila::arithmetic_type<T>>
-void do_trajectory(GaugeField<T> (&U)[2], const PlaquetteField<pT> &plaq_tbc_mode,
+void do_hb_trajectory(GaugeField<T> (&U)[2], const PlaquetteField<pT> &plaq_tbc_mode,
                    const parameters &p, atype alpha = 0) {
     for (int n = 0; n < p.n_update + p.n_overrelax; n++) {
-        update(U, plaq_tbc_mode, p, alpha);
+        hb_update(U, plaq_tbc_mode, p, alpha);
     }
     U[0].reunitarize_gauge();
 }
@@ -576,7 +582,7 @@ int main(int argc, char **argv) {
 
         update_timer.start();
 
-        do_trajectory(U, plaq_tbc_mode, p);
+        do_hb_trajectory(U, plaq_tbc_mode, p);
 
         // put sync here in order to get approx gpu timing
         hila::synchronize_threads();
@@ -595,7 +601,6 @@ int main(int argc, char **argv) {
         if (trajectory >= 0) {
 
             if (p.gflow_freq > 0 && trajectory % p.gflow_freq == 0) {
-
 
                 int gtrajectory = trajectory / p.gflow_freq;
                 if (p.gflow_l_step > 0) {
@@ -628,8 +633,11 @@ int main(int argc, char **argv) {
                                << hila::gettime() - gftime << '\n';
 
                     gf_timer.stop();
+                    
                 }
+
             }
+
         }
 
         if (p.n_save > 0 && (trajectory + 1) % p.n_save == 0) {
