@@ -225,11 +225,8 @@ void update(GaugeField<T> (&U)[2], const PlaquetteField<pT> &plaq_tbc_mode, cons
 template <typename T, typename pT, typename atype = hila::arithmetic_type<T>>
 void do_trajectory(GaugeField<T> (&U)[2], const PlaquetteField<pT> &plaq_tbc_mode,
                    const parameters &p, atype alpha = 0) {
-    for (int n = 0; n < p.n_update; n++) {
-        for (int i = 0; i <= p.n_overrelax; i++) {
-            update(U, plaq_tbc_mode, p, alpha);
-            //hila::out0 << relax << "\n";
-        }
+    for (int n = 0; n < p.n_update + p.n_overrelax; n++) {
+        update(U, plaq_tbc_mode, p, alpha);
     }
     U[0].reunitarize_gauge();
 }
