@@ -172,7 +172,7 @@ class Field {
          * @brief Remove reference to payload of other field
          */
         void free_payload_ref() {
-            payload.delete_field_ref();
+            payload.remove_field_ref();
         }
 
 #ifndef VECTORIZED
@@ -477,8 +477,6 @@ class Field {
                 for (int i = 0; i < has_refs.size(); ++i) {
                     if (has_refs[i] != nullptr) {
                         has_refs[i]->free_with_ref();
-                        has_refs[i]->is_ref_of = nullptr;
-                        has_refs[i] = nullptr;
                     }
                 }
             }

@@ -36,7 +36,7 @@ class field_storage {
     void allocate_field(const lattice_struct &lattice);
     void free_field();
     void set_field_ref(const lattice_struct &lattice, const field_storage &other);
-    void delete_field_ref();
+    void remove_field_ref();
 
 #ifndef VECTORIZED
     // Get an element in a loop

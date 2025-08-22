@@ -47,7 +47,7 @@ void field_storage<T>::set_field_ref(const lattice_struct &lattice, const field_
 }
 
 template <typename T>
-void field_storage<T>::delete_field_ref() {
+void field_storage<T>::remove_field_ref() {
     fieldbuf = nullptr;
 }
 
