@@ -198,6 +198,10 @@ void gather_test() {
                 }
             }
         }
+        hila::broadcast(terminate);
+        if (terminate) {
+            hila::terminate(1);
+        }
         hila::out0 << "testing of field referencing with different nn-topology completed\n";
     }
 #endif
