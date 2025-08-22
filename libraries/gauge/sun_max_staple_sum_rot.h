@@ -22,7 +22,7 @@ SU<N, T> suN_max_staple_sum_rot(const SU<N, T> &staple) {
     SU<N, T> U(1.0);
 
     // get a random permutation of the list of possible matrix indices
-    std::array<int, N> tperm;
+    int tperm[N];
     for (int i = 0; i < N; ++i) {
         tperm[i] = i;
     }
