@@ -785,7 +785,7 @@ void lattice_struct::create_gen_std_gathers() {
                         // sites on the target node:
                         std::stable_sort(to_node_os.begin(), to_node_os.end(),
                                          [](auto i1, auto i2) { return i1.c[0] < i2.c[0]; });
-                        for (size_t i = 0; i < to_node.evensites; ++i) {
+                        for (size_t i = 0; i < to_node.oddsites; ++i) {
                             to_node.sitelist[to_node.evensites + i] = to_node_os[i].c[1];
                         }
                     }
