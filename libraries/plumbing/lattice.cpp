@@ -528,6 +528,7 @@ void lattice_struct::create_std_gathers() {
 #endif
         } else {
             to_node.sitelist = nullptr;
+            from_node.sitelist = nullptr;
         }
 
         if (num > 0) {
@@ -598,11 +599,11 @@ void lattice_struct::create_gen_std_gathers() {
     // be allocated on "device" memory too!
 
     for (int d = 0; d < NDIRS; d++) {
-        neighb[d] = (unsigned *)memalloc(mynode.sites * nn_map.size() * sizeof(unsigned));
+        neighb[d] = (unsigned *)memalloc(mynode.volume() * nn_map.size() * sizeof(unsigned));
         comm_buffer_size[d] = 0;
     }
 
-    size_t c_offset = mynode.sites; // current offset in field-arrays
+    size_t c_offset = mynode.volume(); // current offset in field-arrays
     
     int too_large_node = 0;
 
@@ -611,22 +612,22 @@ void lattice_struct::create_gen_std_gathers() {
 
         // add new gen_comminfo_struct corresponding to current nn-map
         gen_comminfol.push_back(std::array<gen_comminfo_struct, NDIRS>());
-        std::array<gen_comminfo_struct, NDIRS> &gen_comminfo=gen_comminfol.back();
+        std::array<gen_comminfo_struct, NDIRS> &gen_comminfo=gen_comminfol[inntopo];
 
         // loop over positive and negative directions
         for (Direction d = e_x; d < NDIRS; ++d) {
             // pointer to part of neighb[d] reserved for current nn-map:
-            unsigned *neighb_d = neighb[d] + inntopo * mynode.sites;
-            gen_comminfo[d].index = neighb_d;
+            unsigned *neighb_d = neighb[d] + inntopo * mynode.volume();
+            //gen_comminfo[d].index = neighb_d;
 
-            // reference "from" and "to" nodelists for simpler access:
+            // reference "from" and "to" node lists for simpler access:
             std::vector<comm_node_struct> &from_nodel = gen_comminfo[d].from_node;
             std::vector<comm_node_struct> &to_nodel = gen_comminfo[-d].to_node;
 
             // lists for keeping track which sites need communication with which nodes:
             std::vector<int> rank_index(lattice.n_nodes());
             std::fill(rank_index.begin(), rank_index.end(), -1);
-            std::vector<int> reshuffle_list(mynode.sites);
+            std::vector<int> reshuffle_list(mynode.volume());
             std::fill(reshuffle_list.begin(), reshuffle_list.end(), -1);
 
             // flag to be set if even/odd-mismatch occurs in communication
@@ -634,7 +635,7 @@ void lattice_struct::create_gen_std_gathers() {
 
             // pass over sites of this node:
             int nranks = 0; // number of other ranks involved
-            for (size_t i = 0; i < mynode.sites; ++i) {
+            for (size_t i = 0; i < mynode.volume(); ++i) {
                 CoordinateVector ln, l;
                 l = coordinates(i);
                 // set ln to be the neighbour of l according to current nn-map
@@ -647,17 +648,17 @@ void lattice_struct::create_gen_std_gathers() {
                 } else {
                     // ln is on another node 
                     unsigned rank = node_rank(ln);
-                    reshuffle_list[i] = rank; // remember node site i communicates with
+                    reshuffle_list[i] = rank; // remember node with which site i communicates
                     if (rank_index[rank] == -1) {
                         // add newly encountered nodes to from_nodel list
                         from_nodel.push_back(comm_node_struct());
-                        from_nodel.back().rank = rank;
+                        from_nodel[nranks].rank = rank;
                         rank_index[rank] = nranks; // position of the node in from_nodel list
                         ++nranks;
                     }
 
                     // use mynode.sizes to flag neighbors outside this node in neighb[d]
-                    neighb_d[i] = mynode.sites;
+                    neighb_d[i] = mynode.volume();
 
                     // keep track of how many sites (even/odd) need to be communicated with each
                     // node:
@@ -691,13 +692,14 @@ void lattice_struct::create_gen_std_gathers() {
                 from_nodel.begin(), from_nodel.end(),
                 [](comm_node_struct a, comm_node_struct b) { return a.sites > b.sites; });
 
+            size_t buff_offset = 0;
             // now loop over the involved nodes for communication in direction d:
             for (size_t inode = 0; inode < from_nodel.size(); ++inode) {
                 comm_node_struct &from_node = from_nodel[inode];
 
                 // add node to to_nodel:
                 to_nodel.push_back(comm_node_struct()); 
-                comm_node_struct &to_node = to_nodel.back();
+                comm_node_struct &to_node = to_nodel[inode];
                 to_node.rank = from_node.rank;
                 
                 // to_node has same number of sites but opposite parties:
@@ -706,25 +708,26 @@ void lattice_struct::create_gen_std_gathers() {
                 to_node.oddsites = from_node.evensites;
 
                 //set buffer indices
+#ifdef VANILLA
                 from_node.buffer = c_offset; // location in fieldbuffer
-                to_node.buffer = 0;          // send buffers are separete; can start from beginning
+#else
+                from_node.buffer = buff_offset;
+#endif
+                to_node.buffer = buff_offset;
 
-                //determine required send_buffer size:
-                if(to_node.sites > comm_buffer_size[d]) {
-                    comm_buffer_size[d] = to_node.sites;
-                }
+                buff_offset += to_node.sites;
 
                 if (to_node.sites > 0) {
                     // sitelist tells us which sites to send
                     to_node.sitelist = (unsigned *)memalloc(to_node.sites * sizeof(unsigned));
 #ifndef VANILLA
                     from_node.sitelist = (unsigned *)memalloc(from_node.sites * sizeof(unsigned));
+#else
+                    from_node.sitelist = nullptr;
 #endif
                 } else {
                     to_node.sitelist = nullptr;
-#ifndef VANILLA
                     from_node.sitelist = nullptr;
-#endif
                 }
 
                 if (from_node.sites > 0) {
@@ -739,7 +742,7 @@ void lattice_struct::create_gen_std_gathers() {
                     std::vector<idx_pair> to_node_es(to_node.evensites);
                     std::vector<idx_pair> to_node_os(to_node.oddsites);
                     size_t in;
-                    for (size_t i = 0; i < mynode.sites; ++i) {
+                    for (size_t i = 0; i < mynode.volume(); ++i) {
                         if (reshuffle_list[i] == from_node.rank) {
                             CoordinateVector l, ln;
                             l = coordinates(i);
@@ -789,11 +792,15 @@ void lattice_struct::create_gen_std_gathers() {
                             to_node.sitelist[to_node.evensites + i] = to_node_os[i].c[1];
                         }
                     }
-                    c_offset += c_even + c_odd;
+                    c_offset += from_node.sites;
                 }
 
                 if (c_offset >= (1ULL << 32))
                     too_large_node = 1;
+            }
+            // determine required send_buffer size:
+            if (buff_offset > comm_buffer_size[d]) {
+                comm_buffer_size[d] = buff_offset;
             }
         } /* directions */
     }
@@ -826,16 +833,16 @@ void lattice_struct::initialize_wait_arrays() {
      * at that dir is out of the local volume
      */
 
-    wait_arr_ = (dir_mask_t *)memalloc(nn_map.size() * mynode.sites * sizeof(dir_mask_t));
+    wait_arr_ = (dir_mask_t *)memalloc(nn_map.size() * mynode.volume() * sizeof(dir_mask_t));
 
-    for (size_t i = 0; i < mynode.sites; ++i) {
+    for (size_t i = 0; i < mynode.volume(); ++i) {
         wait_arr_[i] = 0; /* basic, no wait */
         foralldir(dir) {
             Direction odir = -dir;
             for (size_t inntopo = 0; inntopo < nn_map.size(); ++inntopo) {
-                if (neighb[dir][i + inntopo * mynode.sites] >= mynode.sites)
+                if (neighb[dir][i + inntopo * mynode.volume()] >= mynode.volume())
                     wait_arr_[i] = wait_arr_[i] | (1 << dir);
-                if (neighb[odir][i + inntopo * mynode.sites] >= mynode.sites)
+                if (neighb[odir][i + inntopo * mynode.volume()] >= mynode.volume())
                     wait_arr_[i] = wait_arr_[i] | (1 << odir);
             }
         }

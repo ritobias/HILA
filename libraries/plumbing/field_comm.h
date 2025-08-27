@@ -120,13 +120,10 @@ T *Field<T>::field_struct::get_receive_buffer(Direction d, Parity par,
 
 #elif defined(CUDA) || defined(HIP)
 
-    unsigned offs = 0;
-    if (par == ODD)
-        offs = from_node.evensites;
     if (receive_buffer[d] == nullptr) {
         receive_buffer[d] = payload.allocate_mpi_buffer(lattice.comm_buffer_size[d]);
     }
-    return receive_buffer[d] + offs;
+    return receive_buffer[d] + from_node.offset(par);
 
 #elif defined(VECTORIZED)
 
@@ -583,7 +580,7 @@ void Field<T>::wait_gather(Direction d, Parity p) const {
         lattice_struct::comm_node_struct &from_node = from_nodel[inode];
         lattice_struct::comm_node_struct &to_node = to_nodel[inode];
 
-          if (from_node.rank != hila::myrank() || to_node.rank != hila::myrank())
+        if (from_node.rank != hila::myrank() || to_node.rank != hila::myrank())
             ok = false;
     }
     if(ok) {

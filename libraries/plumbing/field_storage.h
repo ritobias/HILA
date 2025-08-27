@@ -31,7 +31,7 @@ class field_storage {
     // The actual data content of the class: a pointer to the field and a
     // list of neighbour pointers.
     T *RESTRICT fieldbuf = nullptr;
-    const unsigned *RESTRICT neighbours[NDIRS];
+    unsigned *RESTRICT neighbours[NDIRS];
 
     void allocate_field(const lattice_struct &lattice);
     void free_field();

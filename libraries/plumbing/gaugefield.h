@@ -93,13 +93,23 @@ class GaugeField {
     }
 
     /**
-     * @brief Construct GaugeField that references the field data of other GaugeField but using
+     * @brief Make this GaugeField referencing the field data of other GaugeField but using
      * different nn-topology
      * @param other
      * @param nn_topo
      */
     void make_ref_to(GaugeField &other, int nn_topo) {
         foralldir(d) fdir[d].make_ref_to(other[d], nn_topo);
+    }
+
+    /**
+     * @brief Set nn-topology to nn_topo
+     * @param nn_topo
+     */
+    void set_nn_topo(int nn_topo) {
+        foralldir(d) {
+            fdir[d].set_nn_topo(nn_topo);
+        }
     }
 
     /**

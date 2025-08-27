@@ -57,6 +57,11 @@ class PlaquetteField {
         foralldir(d1) fdir[d1] = 0;
     }
 
+    // make this gauge field reference the field content of other gauge field
+    PlaquetteField(PlaquetteField &other, int nn_topo) {
+        foralldir(d) fdir[d].make_ref_to(other[d], nn_topo);
+    }
+
 
     /////////////////////////////////////////////////
     /// Destructor
@@ -92,6 +97,26 @@ class PlaquetteField {
     PlaquetteField &operator=(const PlaquetteField<A> &rhs) {
         foralldir(d1) fdir[d1] = rhs[d1];
         return *this;
+    }
+
+    /**
+     * @brief make this PlaquetteField referencing the field data of other PlaquetteField but using
+     * different nn-topology
+     * @param other
+     * @param nn_topo
+     */
+    void make_ref_to(PlaquetteField &other, int nn_topo) {
+        foralldir(d) fdir[d].make_ref_to(other[d], nn_topo);
+    }
+
+    /**
+     * @brief Set nn-topology to nn_topo
+     * @param nn_topo
+     */
+    void set_nn_topo(int nn_topo) {
+        foralldir(d) {
+            fdir[d].set_nn_topo(nn_topo);
+        }
     }
 
     ////////////////////////////////////////////////////////

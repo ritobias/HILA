@@ -151,6 +151,7 @@ inline void field_storage<T>::set_element(A &value, const unsigned i,
 template <typename T>
 void field_storage<T>::free_mpi_buffer(T *buffer) {
     std::free(buffer);
+    buffer = nullptr;
 }
 
 template <typename T>

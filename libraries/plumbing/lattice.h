@@ -223,7 +223,7 @@ class lattice_struct {
 
     /// general communication
     struct gen_comminfo_struct {
-        unsigned *index;
+        //unsigned *index;
         std::vector<comm_node_struct> from_node;
         std::vector<comm_node_struct> to_node;
         size_t receive_buf_size;

@@ -338,15 +338,17 @@ class Field {
         assert(other.is_initialized(ALL) && "Initializer Field value not set");
         assert(0 <= nn_topo && nn_topo < lattice.nn_map.size() &&
                "Invalid nn_topo value for ref. Field");
+        other.check_alloc();
         if (other.is_ref_of == nullptr) {
             is_ref_of = &other;
         } else {
             is_ref_of = other.is_ref_of;
+            is_ref_of->check_alloc();
         }
-        assert(other.has_refs[nn_topo] == nullptr &&
+        assert(is_ref_of->has_refs[nn_topo] == nullptr &&
                "Ref. Field with same nn_topo already exists");
-        other.has_refs[nn_topo] = this;
-        allocate_with_ref(other.fs, nn_topo);
+        is_ref_of->has_refs[nn_topo] = this;
+        allocate_with_ref(is_ref_of->fs, nn_topo);
     }
     /**
      * @internal
@@ -545,8 +547,9 @@ class Field {
                 is_ref_of->has_refs[fs->nn_topo] = nullptr;
                 is_ref_of = nullptr;
             }
-            for (Direction d = (Direction)0; d < NDIRS; ++d)
+            for (Direction d = (Direction)0; d < NDIRS; ++d) {
                 drop_comms(d, ALL);
+            }
             fs->free_payload_ref();
             fs->free_communication();
             std::free(fs);
@@ -719,10 +722,12 @@ class Field {
             is_ref_of = &other;
         } else {
             is_ref_of = other.is_ref_of;
+            is_ref_of->check_alloc();
         }
-        assert(other.has_refs[nn_topo] == nullptr && "Ref. Field with same nn_topo already exists");
-        other.has_refs[nn_topo] = this;
-        allocate_with_ref(other.fs, nn_topo);
+        assert(is_ref_of->has_refs[nn_topo] == nullptr && "Ref. Field with same nn_topo already exists");
+        is_ref_of->has_refs[nn_topo] = this;
+        allocate_with_ref(is_ref_of->fs, nn_topo);
+        mark_changed(ALL);
     }
 
     void set_nn_topo(int nn_topo) {
