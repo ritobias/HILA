@@ -338,13 +338,12 @@ class Field {
         assert(other.is_initialized(ALL) && "Initializer Field value not set");
         assert(0 <= nn_topo && nn_topo < lattice.nn_map.size() &&
                "Invalid nn_topo value for ref. Field");
-        other.check_alloc();
         if (other.is_ref_of == nullptr) {
             is_ref_of = &other;
         } else {
             is_ref_of = other.is_ref_of;
-            is_ref_of->check_alloc();
         }
+        is_ref_of->check_alloc();
         assert(is_ref_of->has_refs[nn_topo] == nullptr &&
                "Ref. Field with same nn_topo already exists");
         is_ref_of->has_refs[nn_topo] = this;
@@ -508,7 +507,6 @@ class Field {
         fs->initialize_communication();
         mark_changed(ALL);   // guarantees communications will be done
         fs->assigned_to = 0; // and this means that it is not assigned
-
         for (Direction d = (Direction)0; d < NDIRS; ++d) {
 
 #if !defined(CUDA) && !defined(HIP)
@@ -623,20 +621,28 @@ class Field {
      * @param p Field parity
      */
     void mark_changed(const Parity p) const {
+        if(is_ref_of == nullptr) {
+            for (int i = 0; i < has_refs.size(); ++i) {
+                if (has_refs[i] != nullptr) {
 
-        for (Direction i = (Direction)0; i < NDIRS; ++i) {
-            // check if there's ongoing comms, invalidate it!
-            drop_comms(i, opp_parity(p)); 
+                    for (Direction d = (Direction)0; d < NDIRS; ++d) {
+                        // check if there's ongoing comms, invalidate it!
+                        has_refs[i]->drop_comms(d, opp_parity(p));
 
-            set_gather_status(opp_parity(p), i, gather_status_t::NOT_DONE);
-            if (p != ALL) {
-                set_gather_status(ALL, i, gather_status_t::NOT_DONE);
-            } else {
-                set_gather_status(EVEN, i, gather_status_t::NOT_DONE);
-                set_gather_status(ODD, i, gather_status_t::NOT_DONE);
+                        has_refs[i]->set_gather_status(opp_parity(p), d, gather_status_t::NOT_DONE);
+                        if (p != ALL) {
+                            has_refs[i]->set_gather_status(ALL, d, gather_status_t::NOT_DONE);
+                        } else {
+                            has_refs[i]->set_gather_status(EVEN, d, gather_status_t::NOT_DONE);
+                            has_refs[i]->set_gather_status(ODD, d, gather_status_t::NOT_DONE);
+                        }
+                    }
+                    has_refs[i]->fs->assigned_to |= parity_bits(p);
+                }
             }
+        } else {
+            is_ref_of->mark_changed(p);
         }
-        fs->assigned_to |= parity_bits(p);
     }
 
     /**
@@ -712,7 +718,6 @@ class Field {
     void make_ref_to(Field &other, int nn_topo) {
         assert(0 <= nn_topo && nn_topo < lattice.nn_map.size() &&
                "Invalid nn_topo value for ref. Field");
-        other.check_alloc();
         if(is_ref_of == nullptr) {
             free();
         } else {
@@ -722,8 +727,8 @@ class Field {
             is_ref_of = &other;
         } else {
             is_ref_of = other.is_ref_of;
-            is_ref_of->check_alloc();
         }
+        is_ref_of->check_alloc();
         assert(is_ref_of->has_refs[nn_topo] == nullptr && "Ref. Field with same nn_topo already exists");
         is_ref_of->has_refs[nn_topo] = this;
         allocate_with_ref(is_ref_of->fs, nn_topo);

@@ -3,6 +3,7 @@
 //////////////////////////////////////////////////////////////////////////////
 
 #include "hila.h"
+// #include "tools/string_format.h"
 
 void gather_test() {
 
@@ -79,7 +80,72 @@ void gather_test() {
         //hila::out << "rank " << hila::myrank() << " : testing nn_map_" << inntopo << "\n";
         hila::out0 << "testing nn_map_" << inntopo << "\n";
         f.set_nn_topo(inntopo);
-        //hila::out << "rank " << hila::myrank() << " : nn-topo switched to " << inntopo << "\n";
+        /*
+        if(0) {
+            for (Direction d = e_x; d < NDIRS; ++d) {
+                std::vector<lattice_struct::comm_node_struct> &from_nodel =
+                    lattice.gen_comminfol[inntopo][d].from_node;
+                std::vector<lattice_struct::comm_node_struct> &to_nodel =
+                    lattice.gen_comminfol[inntopo][d].to_node;
+                int dturn = d;
+                hila::broadcast(dturn);
+                if (d == dturn && (d == e_t || d == e_t_down)) {
+                    MPI_Barrier(lattice.mpi_comm_lat);
+                    for (int inode = 0; inode < lattice.n_nodes(); ++inode) {
+                        int turn =-1;
+                        if(hila::myrank() == 0) {
+                            for (auto tnode : from_nodel) {
+                                if(inode == tnode.rank) {
+                                    turn = inode;
+                                    hila::out << string_format("f %4s % 2d  % 2d % 5d (% 5d % 5d) ",
+                                                            hila::direction_name(d), hila::myrank(),
+                                                            tnode.rank, tnode.sites,
+        tnode.evensites, tnode.oddsites); bool even_ok = false; bool odd_ok = false;
+                                    CoordinateVector lne, lno, le, lo;
+                                    for (int i = 0; i < lattice.mynode.volume(); ++i) {
+                                        CoordinateVector l = lattice.coordinates(i);
+                                        CoordinateVector ln = (*(lattice.nn_map[inntopo]))(l, d);
+                                        if (!lattice.is_on_mynode(ln)) {
+                                            unsigned rank = lattice.node_rank(ln);
+                                            if(rank == tnode.rank) {
+                                                if(ln.parity() == EVEN && !even_ok) {
+                                                    even_ok = true;
+                                                    lne = ln;
+                                                    lo = l;
+                                                }
+                                                if (ln.parity() == ODD && !odd_ok) {
+                                                    odd_ok = true;
+                                                    lno = ln;
+                                                    le = l;
+                                                }
+                                            }
+                                        }
+                                    }
+                                    hila::out << lne << " , " << lno << "\n";
+                                }
+                            }
+                        }
+                        hila::broadcast(turn);
+                        MPI_Barrier(lattice.mpi_comm_lat);
+                        if(hila::myrank() == turn) {
+                            for (auto tnode : to_nodel) {
+                                hila::out << string_format("t %4s % 2d  % 2d % 5d (% 5d % 5d)  ",
+                                                        hila::direction_name(d), hila::myrank(),
+                                                        tnode.rank, tnode.sites, tnode.evensites,
+                                                        tnode.oddsites)
+                                        << lattice.coordinates(tnode.sitelist[0]) << " , "
+                                        << lattice.coordinates(tnode.sitelist[tnode.evensites]) <<
+        "\n";
+                            }
+                        }
+                        MPI_Barrier(lattice.mpi_comm_lat);
+                    }
+                    MPI_Barrier(lattice.mpi_comm_lat);
+                }
+            }
+        }
+        */
+        // hila::out << "rank " << hila::myrank() << " : nn-topo switched to " << inntopo << "\n";
         bool terminate = false;
         foralldir(d) {
             {
@@ -100,10 +166,12 @@ void gather_test() {
                             ln = (*(lattice.nn_map[inntopo]))(l, d);
                             dif1 = abs(f1l[i] - ln);
                             if (dif1.squarenorm() != 0) {
-                                hila::out0 << " gen std up-gather test error! Node " << lattice.node_rank(l)
-                                        << " direction " << (unsigned)d << " (to node "
-                                        << lattice.node_rank(ln) << ")" << " dif1=(" << dif1 << ") l=("
-                                        << l << ") ln=(" << ln << ") f1l=(" << f1l[i] << ")" << '\n';
+                                hila::out0 << " gen std up-gather test error!"
+                                           << " dir=" << (unsigned)d << " from node "
+                                           << lattice.node_rank(l) << " to node "
+                                           << lattice.node_rank(ln) << " l=(" << l << ") ln=(" << ln
+                                           << ") f1l=(" << f1l[i] << ")"
+                                           << " dif1=(" << dif1 << ")" << '\n';
                                 terminate = true;
                             }
                         }
@@ -126,16 +194,21 @@ void gather_test() {
                             ln = (*(lattice.nn_map[inntopo]))(l, -d);
                             dif2 = abs(f2l[i] - ln);
                             if (dif2.squarenorm() != 0) {
-                                hila::out0 << " gen std down-gather test error! Node "
-                                           << lattice.node_rank(l) << " direction " << (unsigned)d
-                                           << " (to node " << lattice.node_rank(ln) << ")"
-                                           << " dif2=(" << dif2 << ") l=(" << l << ") ln=(" << ln
-                                           << ") f2l=(" << f2l[i] << ")" << '\n';
+                                hila::out0 << " gen std down-gather test error!"
+                                           << " dir=" << (unsigned)d << " from node "
+                                           << lattice.node_rank(l) << " to node "
+                                           << lattice.node_rank(ln) << " l=(" << l << ") ln=(" << ln
+                                           << ") f2l=(" << f2l[i] << ")"
+                                           << " dif2=(" << dif2 << ")" << '\n';
                                 terminate = true;
                             }
                         }
                     }
                 }
+            }
+            hila::broadcast(terminate);
+            if (terminate) {
+                hila::terminate(1);
             }
         }
         hila::broadcast(terminate);
@@ -171,11 +244,12 @@ void gather_test() {
                             ln = (*(lattice.nn_map[0]))(l, d);
                             dif1 = abs(f1l[i] - ln);
                             if (dif1.squarenorm() != 0) {
-                                hila::out0 << " gen std up-gather test error! Node "
-                                        << lattice.node_rank(l) << " direction " << (unsigned)d
-                                        << " (to node " << lattice.node_rank(ln) << ")" << " dif1=("
-                                        << dif1 << ") l=(" << l << ") ln=(" << ln << ") f1l=("
-                                        << f1l[i] << ")" << '\n';
+                                hila::out0 << " gen std up-gather test error!"
+                                           << " dir=" << (unsigned)d << " from node "
+                                           << lattice.node_rank(l) << " to node "
+                                           << lattice.node_rank(ln) << " l=(" << l << ") ln=(" << ln
+                                           << ") f1l=(" << f1l[i] << ")"
+                                           << " dif1=(" << dif1 << ")" << '\n';
                                 terminate = true;
                             }
                         }
