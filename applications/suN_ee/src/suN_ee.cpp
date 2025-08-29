@@ -1,8 +1,9 @@
 #include "hila.h"
 #include "wilson_plaquette_action_ee.h"
+#include "sun_hmc_ee.h"
 #include "gauge/sun_heatbath.h"
 #include "gauge/sun_overrelax.h"
-#include "gauge/gradient_flow.h"
+#include "gradient_flow_ee.h"
 #include "tools/string_format.h"
 #include "tools/floating_point_epsilon.h"
 #include "gauge/sun_max_staple_sum_rot.h"
@@ -22,6 +23,7 @@ struct parameters {
     ftype beta;         // inverse gauge coupling
     int s;              // number of replicas
     ftype l;            // entangling region slab width
+    ftype alpha;        // interpolation parameter
     int n_traj;         // number of trajectories to generate
     int n_therm;        // number of thermalization trajectories (counts only accepted traj.)
     int n_update;       // number of heat-bath sweeps per "trajectory"
@@ -60,22 +62,25 @@ struct parameters {
  * @param staples Filed to compute staplesum into at each lattice point
  * @param d1 Direction to compute staplesum for
  * @param par Parity to compute staplesum for
- * @param bcmode flag that controls whether plaquettes with paq_tbc_mode = 2 should be treated
- * as 1 or 0 . (if bcmode = -1 (default), they are treated as 0)
+ * @param alpha \in [0,1] bcmode interpolation parameter for plaquettes with plaq_tbc_mode = 2 
  */
 template <typename T, typename pT, typename atype = hila::arithmetic_type<T>>
-void staplesum(const GaugeField<T> (&U)[2], const PlaquetteField<pT> &plaq_tbc_mode,
-               out_only Field<T> &staples, Direction d1, Parity par = ALL, atype alpha = 0.0) {
+void staplesum(const GaugeField<T> (&U)[2], const PlaquetteField<pT> &plaq_tbc_mode, atype alpha,
+               out_only Field<T> &staples, Direction d1, Parity par = ALL) {
 
     Field<T> lower[2];
     lower[1].set_nn_topo(1);
-    bool first = true;
+
+    onsites(par) staples[X] = 0;
+
     foralldir(d2) if (d2 != d1) {
 
-        U[0][d1].start_gather(d2, par);
+        U[1][d2].start_gather(d1, ALL);
+        U[0][d2].start_gather(d1, ALL);
         U[1][d1].start_gather(d2, par);
- 
-        // calculate first lower 'U' of the staple sum
+        U[0][d1].start_gather(d2, par);
+
+        // calculate first lower 'u' of the staple sum
         // do it on opp parity
         onsites(opp_parity(par)) {
             int ip = plaq_tbc_mode[d1][d2][X];
@@ -89,44 +94,32 @@ void staplesum(const GaugeField<T> (&U)[2], const PlaquetteField<pT> &plaq_tbc_m
             }
         }
 
+        plaq_tbc_mode[d1][d2].start_gather(-d2, par);
+        lower[1].start_gather(-d2, par);
+        lower[0].start_gather(-d2, par);
+
         // calculate then the upper 'n', and add the lower
         // lower could also be added on a separate loop
-        if (first) {
-            onsites(par) {
-                int ip = plaq_tbc_mode[d1][d2][X];
-                if (ip == 1) {
-                    staples[X] = (U[1][d2][X] * U[1][d1][X + d2] * U[1][d2][X + d1].dagger()) +
-                                 lower[1][X - d2];
-                } else if(ip == 2) {
-                    staples[X] =
-                        (1.0 - alpha) *
-                            (U[0][d2][X] * U[0][d1][X + d2] * U[0][d2][X + d1].dagger() + lower[0][X - d2]) +
-                        alpha * (U[1][d2][X] * U[1][d1][X + d2] * U[1][d2][X + d1].dagger() + lower[1][X - d2]);
-
-                } else {
-                    staples[X] = (U[0][d2][X] * U[0][d1][X + d2] * U[0][d2][X + d1].dagger()) +
-                                 lower[0][X - d2];
-                }
+        onsites(par) {
+            int ip = plaq_tbc_mode[d1][d2][X];
+            if (ip == 1) {
+                staples[X] += (U[1][d2][X] * U[1][d1][X + d2] * U[1][d2][X + d1].dagger());
+            } else if (ip == 2) {
+                staples[X] +=
+                    alpha * (U[1][d2][X] * U[1][d1][X + d2] * U[1][d2][X + d1].dagger()) +
+                    (1.0 - alpha) * (U[0][d2][X] * U[0][d1][X + d2] * U[0][d2][X + d1].dagger());
+            } else {
+                staples[X] += (U[0][d2][X] * U[0][d1][X + d2] * U[0][d2][X + d1].dagger());
             }
-            first = false;
-        } else {
-            onsites(par) {
-                int ip = plaq_tbc_mode[d1][d2][X];
-                if (ip == 1) {
-                    staples[X] += (U[1][d2][X] * U[1][d1][X + d2] * U[1][d2][X + d1].dagger()) +
-                                 lower[1][X - d2];
-                } else if (ip == 2) {
-                    staples[X] +=
-                        (1.0 - alpha) *
-                            (U[0][d2][X] * U[0][d1][X + d2] * U[0][d2][X + d1].dagger() +
-                             lower[0][X - d2]) +
-                        alpha * (U[1][d2][X] * U[1][d1][X + d2] * U[1][d2][X + d1].dagger() +
-                                 lower[1][X - d2]);
-
-                } else {
-                    staples[X] += (U[0][d2][X] * U[0][d1][X + d2] * U[0][d2][X + d1].dagger()) +
-                                 lower[0][X - d2];
-                }
+        }
+        onsites(par) {
+            int ip = plaq_tbc_mode[d1][d2][X - d2];
+            if (ip == 1) {
+                staples[X] += lower[1][X - d2];
+            } else if (ip == 2) {
+                staples[X] += alpha * lower[1][X - d2] + (1.0 - alpha) * lower[0][X - d2];
+            } else {
+                staples[X] += lower[0][X - d2];
             }
         }
     }
@@ -135,7 +128,7 @@ void staplesum(const GaugeField<T> (&U)[2], const PlaquetteField<pT> &plaq_tbc_m
 /**
  * @brief Wrapper function to updated GaugeField per direction
  * @details Computes first staplesum, then uses computed result to evolve GaugeField either with
- * over relaxation or heat bath
+ * overrelaxation or heatbath
  *
  * @tparam T gaug field type
  * @tparam pT type of plaq_tbc_mode
@@ -147,21 +140,19 @@ void staplesum(const GaugeField<T> (&U)[2], const PlaquetteField<pT> &plaq_tbc_m
  * @param relax bool specifies whether
  * to update with overrelaxation (or heatbath)
  */
-template <typename T, typename pT, typename atype = hila::arithmetic_type<T>>
+template <typename T, typename pT>
 void hb_update_parity_dir(GaugeField<T> (&U)[2], const PlaquetteField<pT> &plaq_tbc_mode,
-                       const parameters &p, Direction d, Parity par, bool relax, atype alpha = 0) {
+                       const parameters &p, Direction d, Parity par, bool relax) {
 
     static hila::timer hb_timer("Heatbath");
     static hila::timer or_timer("Overrelax");
     static hila::timer staples_timer("Staplesum");
 
-    double accr = 0.0;
-
     Field<T> staples;
 
     staples_timer.start();
 
-    staplesum(U, plaq_tbc_mode, staples, d, par, alpha);
+    staplesum(U, plaq_tbc_mode, p.alpha, staples, d, par);
 
     staples_timer.stop();
 
@@ -200,9 +191,8 @@ void hb_update_parity_dir(GaugeField<T> (&U)[2], const PlaquetteField<pT> &plaq_
  * @param plaq_tbc_mode PlaquetteField specifying nn-topology to be used to compute plaquettes
  * @param p parameters
  */
-template <typename T, typename pT, typename atype = hila::arithmetic_type<T>>
-void hb_update(GaugeField<T> (&U)[2], const PlaquetteField<pT> &plaq_tbc_mode, const parameters &p,
-               atype alpha = 0) {
+template <typename T, typename pT>
+void hb_update(GaugeField<T> (&U)[2], const PlaquetteField<pT> &plaq_tbc_mode, const parameters &p) {
     for (int i = 0; i < 2 * NDIM; ++i) {
         // randomly choose a parity and a direction:
         int tdp = hila::broadcast((int)(hila::random() * 2 * NDIM));
@@ -213,7 +203,7 @@ void hb_update(GaugeField<T> (&U)[2], const PlaquetteField<pT> &plaq_tbc_mode, c
         bool relax =
             hila::broadcast((int)(hila::random() * (p.n_update + p.n_overrelax)) >= p.n_update);
         // perform the selected updates:
-        hb_update_parity_dir(U, plaq_tbc_mode, p, Direction(tdir), Parity(tpar), relax, alpha);
+        hb_update_parity_dir(U, plaq_tbc_mode, p, Direction(tdir), Parity(tpar), relax);
     }
 }
 
@@ -228,11 +218,11 @@ void hb_update(GaugeField<T> (&U)[2], const PlaquetteField<pT> &plaq_tbc_mode, c
  * @param plaq_tbc_mode PlaquetteField specifying nn-topology to be used to compute plaquettes
  * @param p parameters
  */
-template <typename T, typename pT, typename atype = hila::arithmetic_type<T>>
+template <typename T, typename pT>
 void do_hb_trajectory(GaugeField<T> (&U)[2], const PlaquetteField<pT> &plaq_tbc_mode,
-                   const parameters &p, atype alpha = 0) {
+                   const parameters &p) {
     for (int n = 0; n < p.n_update + p.n_overrelax; n++) {
-        hb_update(U, plaq_tbc_mode, p, alpha);
+        hb_update(U, plaq_tbc_mode, p);
     }
     U[0].reunitarize_gauge();
 }
@@ -241,19 +231,89 @@ void do_hb_trajectory(GaugeField<T> (&U)[2], const PlaquetteField<pT> &plaq_tbc_
 ///////////////////////////////////////////////////////////////////////////////////
 // measurement functions
 
-template <typename T, typename pT>
-void measure_stuff(const GaugeField<T> (&U)[2], const PlaquetteField<pT> &plaq, const parameters &p) {
-    // perform measurements on current gauge and momentum pair (U, E) and
-    // print results in formatted form to standard output
+template <typename T, typename pT, typename atype = hila::arithmetic_type<T>>
+void do_hmc_measure(GaugeField<T> (&U)[2], const PlaquetteField<pT> &plaq_tbc_mode,
+                   parameters &p, const hmc_parameters &p_hmc) {
+
+    static hila::timer hmc_timer("HMC");
+    hmc_timer.start();
+
+    auto alpha = p.alpha;
+
+    atype ds = 0;
+    GaugeField<T> U_old = U[0];
+
+    VectorField<Algebra<T>> E;
+
     static bool first = true;
     if (first) {
         // print legend for measurement output
-        hila::out0 << "LMEAS:        plaq\n";
+        hila::out0 << "LHMC: DIR       S_TOT_S        dS_TOT       dS_PLAQ        dE_KIN        dS_EXT"
+                      "    SUCC       TIME\n";
         first = false;
     }
-    auto plaqs = measure_s_wplaq(U, plaq) / (lattice.volume() * NDIM * (NDIM - 1) / 2);
-    auto dplaqs = measure_ds_wplaq_dbcms(U, plaq) / (p.s * (NDIM - 1));
-    hila::out0 << string_format("MEAS % 0.6e % 0.6e", plaqs, dplaqs) << '\n';
+
+    int ipdir=0;
+
+    foralldir(d) onsites(ALL) E[d][X].gaussian_random();
+
+    double g_act_old, g_act_new, e_act_old, e_act_new;
+
+    auto act_old = measure_action(U, plaq_tbc_mode, alpha, E, p_hmc, g_act_old, e_act_old);
+
+    ftype ttime = hila::gettime();
+
+    //do_hmc_trajectory(U, plaq_tbc_mode, alpha, E, p_hmc);
+    if (alpha == 0) {
+        ipdir = 1;
+        do_interp_hmc_trajectory(U, plaq_tbc_mode, E, p_hmc, ipdir, ds);
+        alpha = 1.0;
+    } else {
+        ipdir = -1;
+        do_interp_hmc_trajectory(U, plaq_tbc_mode, E, p_hmc, ipdir, ds);
+        alpha = 0;
+    }
+    //do_hmc_trajectory(U, plaq_tbc_mode, alpha, E, p_hmc);
+
+    auto act_new = measure_action(U, plaq_tbc_mode, alpha, E, p_hmc, g_act_new, e_act_new);
+
+
+    bool reject = hila::broadcast(exp(-(act_new - act_old)) < hila::random());
+    //bool reject = true;
+
+
+    hila::out0 << string_format("HMC    % 1d % 0.6e % 0.6e % 0.6e % 0.6e % 0.6e      % 1d    %0.5f\n", ipdir,
+                                act_old, act_new - act_old, g_act_new - g_act_old,
+                                e_act_new - e_act_old, ds, (int)!reject, hila::gettime() - ttime);
+
+
+    if (reject) {
+        U[0] = U_old;
+    } else {
+        p.alpha = alpha;
+    }
+
+    hmc_timer.stop();
+}
+
+
+template <typename T, typename pT, typename atype = hila::arithmetic_type<T>>
+void measure_stuff(const GaugeField<T> (&U)[2], const PlaquetteField<pT> &plaq_tbc_mode,
+                   parameters &p) {
+    // perform measurements on current gauge field and print results in formatted form to standard
+    // output
+    static bool first = true;
+    if (first) {
+        // print legend for measurement output
+        hila::out0 << "LMEAS:        plaq         dplaq\n";
+        first = false;
+    }
+
+    auto plaqs =
+        measure_s_wplaq(U, plaq_tbc_mode, p.alpha) / (lattice.volume() * NDIM * (NDIM - 1) / 2);
+    auto dplaqs = measure_ds_wplaq_dbcms(U, plaq_tbc_mode) / (p.s * (NDIM - 1));
+
+    hila::out0 << string_format("MEAS % 0.6e % 0.6e\n", plaqs, dplaqs);
 }
 
 // end measurement functions
@@ -273,6 +333,7 @@ void checkpoint(const GaugeField<T> &U, int trajectory, const parameters &p) {
         std::ofstream outf;
         outf.open("run_status", std::ios::out | std::ios::trunc);
         outf << "trajectory  " << trajectory + 1 << '\n';
+        outf << "alpha       " << p.alpha << "\n";
         outf << "seed        " << static_cast<uint64_t>(hila::random() * (1UL << 61)) << '\n';
         outf << "time        " << hila::gettime() << '\n';
         // write config name to status file:
@@ -293,6 +354,7 @@ bool restore_checkpoint(GaugeField<T> &U, int &trajectory, parameters &p) {
     if (status.open("run_status", false, false)) {
         hila::out0 << "RESTORING FROM CHECKPOINT:\n";
         trajectory = status.get("trajectory");
+        p.alpha = status.get("alpha");
         seed = status.get("seed");
         p.time_offset = status.get("time");
         // get config name with suffix from status file:
@@ -325,9 +387,10 @@ public:
     int s;
     int Nts;
     u_nn_map_t(const CoordinateVector &tlsize, int ts) : nn_map_t(tlsize), s(ts) {
-        hila::out0 << "using user-defined nn-mapping with s=" << s << " replica\n";
+        hila::out0 << "using user-defined nn-mapping with s=" << s << " replica";
         if(s > 0 && lsize[e_t] % s == 0) { 
             Nts = lsize[e_t] / s;
+            hila::out0 << " of temporal extent Nts=" << Nts << "\n";
         } else {
             s = 1;
             Nts = lsize[e_t];
@@ -408,6 +471,10 @@ int main(int argc, char **argv) {
     // hila::initialize should be called as early as possible
     hila::initialize(argc, argv);
 
+    hila::out0 << "SU(" << mygroup::size() << ") heat-bath with overrelaxation\n";
+
+    hila::out0 << "Using floating point epsilon: " << fp<ftype>::epsilon << "\n";
+
     // hila provides an input class hila::input, which is
     // a convenient way to read in parameters from input files.
     // parameters are presented as key - value pairs, as an example
@@ -419,11 +486,8 @@ int main(int argc, char **argv) {
     // .get() -method can read many different input types,
     // see file "input.h" for documentation
 
-    hila::out0 << "SU(" << mygroup::size() << ") heat-bath with overrelaxation\n";
-
-    hila::out0 << "Using floating point epsilon: " << fp<ftype>::epsilon << "\n";
-
     parameters p;
+    hmc_parameters p_hmc;
 
     hila::input par("parameters");
 
@@ -432,6 +496,7 @@ int main(int argc, char **argv) {
     lsize = par.get("lattice size");
     // inverse gauge coupling
     p.beta = par.get("beta");
+    p_hmc.beta = p.beta;
     // number of replicas
     p.s = par.get("replica number");
     // entangling region slab width
@@ -444,6 +509,9 @@ int main(int argc, char **argv) {
     p.n_overrelax = par.get("overrelax steps");
     // number of thermalization trajectories
     p.n_therm = par.get("thermalization trajs");
+    // hmc trajectory length
+    p_hmc.trajlen = par.get("hmc trajlen");
+    p_hmc.dt = 1.0 / p_hmc.trajlen;
     // wilson flow frequency (number of traj. between w. flow measurement)
     p.gflow_freq = par.get("gflow freq");
     // wilson flow max. flow-distance
@@ -462,6 +530,8 @@ int main(int argc, char **argv) {
     p.config_file = par.get("config name");
 
     par.close(); // file is closed also when par goes out of scope
+
+    p.alpha = 0;
 
     if(p.s<=1) {
         hila::out0 << "Error: replica number s must be larger than 1. Current value is s=" << p.s << "\n";
@@ -513,14 +583,23 @@ int main(int argc, char **argv) {
     // plaquette field indicating whether a plaquette belongs to region A (value 1) 
     // or region B (value 0)
     PlaquetteField<int> plaq_tbc_mode;
+    plaq_tbc_mode.set_nn_topo(1);
     foralldir(d1) {
-        onsites(ALL) plaq_tbc_mode[d1][d1][X] = -1;
+        onsites(ALL) {
+            int bid0 = bcmsid[X];
+            int bid1 = bcmsid[X + d1];
+            if (bid0 <= bcms && bid1 <= bcms) {
+                // link belongs to region A
+                plaq_tbc_mode[d1][d1][X] = 1;
+            } else {
+                // link belongs to region B
+                plaq_tbc_mode[d1][d1][X] = 0;
+            }
+        }
         foralldir(d2) if(d2 != d1) {
             onsites(ALL) {
-                int bid0 = bcmsid[X];
-                int bid1 = bcmsid[X + d1];
                 int bid2 = bcmsid[X + d2];
-                if (bid0 <= bcms && bid1 <= bcms && bid2 <= bcms) {
+                if (plaq_tbc_mode[d1][d1][X] == 1 && bid2 <= bcms) {
                     // plaquette belongs to region A
                     plaq_tbc_mode[d1][d2][X] = 1;
                 } else {
@@ -548,17 +627,23 @@ int main(int argc, char **argv) {
     /*
     if(0) {
         foralldir(d1) {
-            foralldir(d2) if(d1 < d2) {
+            foralldir(d2) if(d1 != d2) {
                 onsites(ALL) {
-                    if(plaq_tbc_mode[d1][d2][X] == 2) {
+                    int ip = plaq_tbc_mode[d1][d2][X];
+                    if (ip == 2) {
                         hila::out << "X=(" << X.coordinates() << "), d1=" << d1 << ", d2=" << d2
-                                << "\n";
+                                  << ", X+" << d2 << ": " << plaq_tbc_mode[d1][d2][X + d2] << ", X-"
+                                  << d2 << ": " << plaq_tbc_mode[d1][d2][X - d2] << "\n";
+                    } else if(ip == -1) {
+                        hila::out << "error: " << "X=(" << X.coordinates() << "), d1=" << d1
+                                  << ", d2=" << d2 << " plaq_tbc_mode = 0\n";
                     }
                 }
             }
         }
     }
     */
+
 
     // use negative trajectory for thermal
     int start_traj = -p.n_therm;
@@ -569,16 +654,13 @@ int main(int argc, char **argv) {
         U[0] = 1;
     }
     U[1].make_ref_to(U[0], 1);
-    VectorField<Algebra<mygroup>> E[2];
-    E[1].make_ref_to(E[0], 1);
-
 
     hila::timer update_timer("Updates");
     hila::timer measure_timer("Measurements");
     hila::timer gf_timer("Gradient Flow");
 
     ftype t_step0 = 0;
-    for (int trajectory = start_traj; trajectory < p.n_traj; ++trajectory) {
+    for (int trajectory = start_traj; trajectory <= p.n_traj; ++trajectory) {
 
         ftype ttime = hila::gettime();
 
@@ -595,6 +677,8 @@ int main(int argc, char **argv) {
         hila::out0 << "Measure_start " << trajectory << '\n';
 
         measure_stuff(U, plaq_tbc_mode, p);
+
+        do_hmc_measure(U, plaq_tbc_mode, p, p_hmc);
 
         hila::out0 << "Measure_end " << trajectory << '\n';
 
@@ -613,22 +697,24 @@ int main(int argc, char **argv) {
                     ftype gftime = hila::gettime();
                     hila::out0 << "Gflow_start " << gtrajectory << '\n';
 
-                    GaugeField<mygroup> V = U[0];
+                    GaugeField<mygroup> V[2];
+                    V[1].make_ref_to(V[0], 1);
+                    V[0] = U[0];
 
                     ftype t_step = t_step0;
-                    measure_gradient_flow_stuff(V, (ftype)0.0, t_step);
-                    t_step = do_gradient_flow_adapt(V, (ftype)0.0, p.gflow_l_step, p.gflow_a_accu,
+                    measure_gradient_flow_stuff(V, plaq_tbc_mode, p.alpha, (ftype)0.0, t_step, p.s);
+                    t_step = do_gradient_flow_adapt(V, plaq_tbc_mode, p.alpha, (ftype)0.0, p.gflow_l_step, p.gflow_a_accu,
                                                     p.gflow_r_accu, t_step);
-                    measure_gradient_flow_stuff(V, p.gflow_l_step, t_step);
+                    measure_gradient_flow_stuff(V, plaq_tbc_mode, p.alpha, p.gflow_l_step, t_step, p.s);
                     t_step0 = t_step;
 
                     for (int i = 1; i < nflow_steps; ++i) {
 
                         t_step =
-                            do_gradient_flow_adapt(V, i * p.gflow_l_step, (i + 1) * p.gflow_l_step,
+                            do_gradient_flow_adapt(V, plaq_tbc_mode, p.alpha, i * p.gflow_l_step, (i + 1) * p.gflow_l_step,
                                                    p.gflow_a_accu, p.gflow_r_accu, t_step);
 
-                        measure_gradient_flow_stuff(V, (i + 1) * p.gflow_l_step, t_step);
+                        measure_gradient_flow_stuff(V, plaq_tbc_mode, p.alpha, (i + 1) * p.gflow_l_step, t_step, p.s);
                     }
 
                     hila::out0 << "Gflow_end " << gtrajectory << "    time " << std::setprecision(3)

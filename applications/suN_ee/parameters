@@ -1,15 +1,16 @@
 # This is a parameter file for SUN_ee
 
-lattice size           16,15,15,16
-beta                   11.
+lattice size           18,11,11,24
+beta                   10.79191
 replica number         2
 slab width             2.5
-number of trajectories 110
-updates in trajectory  5
-overrelax steps        5
+number of trajectories 220
+updates in trajectory  10
+overrelax steps        10
 thermalization trajs   10
+hmc trajlen            100
 gflow freq             0
-gflow max lambda       0.
+gflow max lambda       0
 gflow lambda step      0.1
 gflow abs. accuracy    1.0e-7
 gflow rel. accuracy    1.0e-4
