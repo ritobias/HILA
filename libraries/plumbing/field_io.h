@@ -268,6 +268,85 @@ static void read_fields(const std::string &filename, fieldtypes &...fields) {
 }
 
 
+template <typename T>
+void Field<T>::config_write(const std::string &filename) const {
+    std::ofstream outputfile;
+    hila::open_output_file(filename, outputfile);
+
+    // write header
+    if (hila::myrank() == 0) {
+        int64_t f = config_flag;
+        outputfile.write(reinterpret_cast<char *>(&f), sizeof(int64_t));
+        f = NDIM;
+        outputfile.write(reinterpret_cast<char *>(&f), sizeof(int64_t));
+        f = sizeof(T);
+        outputfile.write(reinterpret_cast<char *>(&f), sizeof(int64_t));
+
+        foralldir(d) {
+            f = lattice.size(d);
+            outputfile.write(reinterpret_cast<char *>(&f), sizeof(int64_t));
+        }
+    }
+
+    write(outputfile);
+    hila::close_file(filename, outputfile);
+}
+
+template <typename T>
+void Field<T>::config_read(const std::string &filename) {
+    std::ifstream inputfile;
+    hila::open_input_file(filename, inputfile);
+    std::string conferr("CONFIG ERROR in file " + filename + ": ");
+
+    // read header
+    bool ok = true;
+    int64_t f;
+    if (hila::myrank() == 0) {
+        inputfile.read(reinterpret_cast<char *>(&f), sizeof(int64_t));
+        ok = (f == config_flag);
+        if (!ok)
+            hila::out0 << conferr << "wrong id, should be " << config_flag << " is " << f << '\n';
+    }
+
+    if (ok && hila::myrank() == 0) {
+        inputfile.read(reinterpret_cast<char *>(&f), sizeof(int64_t));
+        ok = (f == NDIM);
+        if (!ok)
+            hila::out0 << conferr << "wrong dimensionality, should be " << NDIM << " is " << f
+                       << '\n';
+    }
+
+    if (ok && hila::myrank() == 0) {
+        inputfile.read(reinterpret_cast<char *>(&f), sizeof(int64_t));
+        ok = (f == sizeof(T));
+        if (!ok)
+            hila::out0 << conferr << "wrong size of field element, should be " << sizeof(T)
+                       << " is " << f << '\n';
+    }
+
+    CoordinateVector insize = lattice.size();
+    if (ok && hila::myrank() == 0) {
+        foralldir(d) {
+            inputfile.read(reinterpret_cast<char *>(&f), sizeof(int64_t));
+            insize[d] = f;
+            ok = ok && (lattice.size(d) % insize[d] == 0);
+            if (!ok)
+                hila::out0 << conferr << "incorrect lattice dimension " << hila::prettyprint(d)
+                           << " is " << f << " should be (or divide)" << lattice.size(d) << '\n';
+        }
+    }
+
+    if (!hila::broadcast(ok)) {
+        hila::terminate(1);
+    } else {
+        hila::broadcast_array(insize.c, NDIM);
+    }
+
+    read(inputfile, insize);
+    hila::close_file(filename, inputfile);
+}
+
+
 ///////////////////////////////////////////////////////////////////////////////
 
 /// Write a "subspace" of the original lattice

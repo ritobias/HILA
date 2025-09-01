@@ -64,6 +64,8 @@ class Field {
     enum class gather_status_t : unsigned { NOT_DONE, STARTED, DONE };
 
   private:
+    // somewhat arbitrary fingerprint flag for configuration files
+    static constexpr int64_t config_flag = 394824242;
     /**
      * @internal
      * @class field_struct
@@ -348,6 +350,7 @@ class Field {
                "Ref. Field with same nn_topo already exists");
         is_ref_of->has_refs[nn_topo] = this;
         allocate_with_ref(is_ref_of->fs, nn_topo);
+        mark_changed(ALL);
     }
     /**
      * @internal
@@ -403,7 +406,28 @@ class Field {
      */
     Field(Field &&rhs) {
         fs = rhs.fs;
+        has_refs = rhs.has_refs;
+        is_ref_of = rhs.is_ref_of;
         rhs.fs = nullptr;
+        rhs.is_ref_of = nullptr;
+        for (int i = 0; i < rhs.has_refs.size(); ++i) {
+            rhs.has_refs[i] = nullptr;
+        }
+        if(fs != nullptr) {
+            if (is_ref_of == nullptr) { 
+                for (int i = 0; i < has_refs.size(); ++i) {
+                    if(i == fs->nn_topo) {
+                        has_refs[i] = this;
+                    } else {
+                        if(has_refs[i] != nullptr) {
+                            has_refs[i]->is_ref_of = this;
+                        }
+                    }
+                }
+            } else {
+                is_ref_of->has_refs[fs->nn_topo] = this;
+            }
+        }
     }
 
     ~Field() {
@@ -437,8 +461,8 @@ class Field {
         has_refs[0] = this;
         fs->allocate_payload();
         fs->initialize_communication();
-        mark_changed(ALL);   // guarantees communications will be done
         fs->assigned_to = 0; // and this means that it is not assigned
+        mark_changed(ALL);   // guarantees communications will be done
 
         for (Direction d = (Direction)0; d < NDIRS; ++d) {
 
@@ -505,8 +529,8 @@ class Field {
         fs->nn_topo = nn_topo;
         fs->allocate_payload_from_ref(otherfs->payload);
         fs->initialize_communication();
-        mark_changed(ALL);   // guarantees communications will be done
-        fs->assigned_to = 0; // and this means that it is not assigned
+        fs->assigned_to = otherfs->assigned_to;
+        mark_changed(ALL); // guarantees communications will be done
         for (Direction d = (Direction)0; d < NDIRS; ++d) {
 
 #if !defined(CUDA) && !defined(HIP)
@@ -569,11 +593,7 @@ class Field {
      * @return bool
      */
     bool is_initialized(Parity p) const {
-        if(is_ref_of == nullptr) {
-            return fs != nullptr && (((fs->assigned_to & parity_bits(p)) != 0));
-        } else {
-            return is_ref_of->fs != nullptr && (((is_ref_of->fs->assigned_to & parity_bits(p)) != 0));
-        }
+        return fs != nullptr && ((fs->assigned_to & parity_bits(p)) != 0);
     }
 
     /**
@@ -732,7 +752,6 @@ class Field {
         assert(is_ref_of->has_refs[nn_topo] == nullptr && "Ref. Field with same nn_topo already exists");
         is_ref_of->has_refs[nn_topo] = this;
         allocate_with_ref(is_ref_of->fs, nn_topo);
-        mark_changed(ALL);
     }
 
     void set_nn_topo(int nn_topo) {
@@ -1039,9 +1058,67 @@ class Field {
      */
     Field<T> &operator=(Field<T> &&rhs) {
         if (this != &rhs) {
-            free();
-            fs = rhs.fs;
-            rhs.fs = nullptr;
+            if(fs != nullptr) {
+                // to preserve referencing relations of the current field, we only steel the
+                // payload field buffer from the rhs field
+                Field<T> *tfld;
+                if (is_ref_of == nullptr) {
+                    // current field is owner of currently used field buffer
+                    tfld = this;
+                } else {
+                    // current field is referncing to field buffer of another field
+                    tfld = is_ref_of;
+                }
+                // replace current field buffer by field buffer of rhs field:
+                tfld->fs->payload.free_field(); 
+                tfld->fs->payload.set_field_ref(lattice, rhs.fs->payload);
+
+                // remove potential reference to field buffer from rhs field:
+                rhs.fs->payload.fieldbuf = nullptr;
+                rhs.is_ref_of = nullptr;
+                for (int i = 0; i < rhs.has_refs.size(); ++i) {
+                    rhs.has_refs[i] = nullptr;
+                }
+                rhs.free();
+
+                // update field buffer address in all fields that reference to this field:
+                for (int i = 0; i < tfld->has_refs.size(); ++i) {
+                    if (i != tfld->fs->nn_topo && tfld->has_refs[i] != nullptr) {
+                        tfld->has_refs[i]->fs->payload.set_field_ref(lattice, tfld->fs->payload);
+                    }
+                }
+            } else {
+                // current field has not been initialized; will steel all data from rhs field:
+                fs = rhs.fs; // steel whole field_struct
+                has_refs = rhs.has_refs; // information on fields that reference the stolen field buffer
+                is_ref_of = rhs.is_ref_of; // information of owner field of stolen field buffer
+
+                // remove reference information from rhs field
+                rhs.fs = nullptr;
+                rhs.is_ref_of = nullptr;
+                for (int i = 0; i < rhs.has_refs.size(); ++i) {
+                    rhs.has_refs[i] = nullptr;
+                }
+
+                if (fs != nullptr) {
+                    // update field buffer referencing information with current field:
+                    if (is_ref_of == nullptr) {
+                        // current field is new owner of field buffer
+                        for (int i = 0; i < has_refs.size(); ++i) {
+                            if (i == fs->nn_topo) {
+                                has_refs[i] = this;
+                            } else {
+                                if (has_refs[i] != nullptr) {
+                                    has_refs[i]->is_ref_of = this;
+                                }
+                            }
+                        }
+                    } else {
+                        // current field is new referncing field to field buffer
+                        is_ref_of->has_refs[fs->nn_topo] = this;
+                    }
+                }
+            }
         }
         return *this;
     }
@@ -1605,6 +1682,9 @@ class Field {
     void read(std::ifstream &inputfile);
     void read(std::ifstream &inputfile, const CoordinateVector &insize);
     void read(const std::string &filename);
+
+    void config_write(const std::string &filename) const;
+    void config_read(const std::string &filename);
 
     void write_subvolume(std::ofstream &outputfile, const CoordinateVector &cmin,
                          const CoordinateVector &cmax, int precision = 6) const;

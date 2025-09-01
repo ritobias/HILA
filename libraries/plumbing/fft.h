@@ -430,7 +430,7 @@ inline void FFT_field(const Field<T> &input, Field<T> &result,
  * . // Field f is defined
  * .
  * auto res = f.FFT(e_x) //Forward transform in x-direction
- * auto res_2 = res.FFT(e_X,fft_direction::back) // res_2 is same as f
+ * auto res_2 = res.FFT(e_x,fft_direction::back) // res_2 is same as f
  * @endcode
  *
  * With this in mind `f.FFT(e_x+e_y+e_z) = f.FFT()`
