@@ -443,7 +443,6 @@ int main(int argc, char **argv) {
         }
     }
 
-
     // use negative trajectory for thermal
     int start_traj = -p.n_therm;
 
@@ -461,15 +460,53 @@ int main(int argc, char **argv) {
 
     double act_old, act_new, s_old, s_new;
 
-    s_old = measure_s(S, bcmsid, p);
+    // variables for controlling HMC step size during thermalization:
+    auto orig_dt = p.dt;
+    auto orig_trajlen = p.trajlen;
+    int nreject = 0;
+    ftype t_step0 = 0.0;
 
+    s_old = measure_s(S, bcmsid, p);
     onsites(ALL) S_back[X] = S[0][X];
 
-    for (int trajectory = start_traj; trajectory <= p.n_traj; ++trajectory) {
 
-        ftype ttime = hila::gettime();
+
+    for (int trajectory = start_traj; trajectory <= p.n_traj; ++trajectory) {
+        if (trajectory < 0) {
+            // during thermalization: start with 10% of normal step size (and trajectory length)
+            // and increse linearly with number of accepted thermalization trajectories. normal
+            // step size is reached after 3/4*p.n_therm accepted thermalization trajectories.
+            if (trajectory - start_traj < p.n_therm * 3.0 / 4.0) {
+                p.dt = orig_dt * (0.1 + 0.9 * 4.0 / 3.0 * (trajectory - start_traj) / p.n_therm);
+                p.trajlen = orig_trajlen;
+            } else {
+                p.dt = orig_dt;
+                p.trajlen = orig_trajlen;
+            }
+            if (nreject > 1) {
+                // if two consecutive thermalization trajectories are rejected, decrese the
+                // step size by factor 0.5 (but keeping trajectory length constant, since
+                // thermalization becomes inefficient if trajectory length decreases)
+                for (int irej = 0; irej < nreject - 1; ++irej) {
+                    p.dt *= 0.5;
+                    p.trajlen *= 2;
+                }
+                hila::out0 << " thermalization step size(reduzed due to multiple reject) dt="
+                           << std::setprecision(8) << p.dt << '\n';
+            } else {
+                hila::out0 << " thermalization step size dt=" << std::setprecision(8) << p.dt
+                           << '\n';
+            }
+        } else if (trajectory == 0) {
+            p.dt = orig_dt;
+            p.trajlen = orig_trajlen;
+            hila::out0 << " normal stepsize dt=" << std::setprecision(8) << p.dt << '\n';
+        }
+
 
         update_timer.start();
+
+        ftype ttime = hila::gettime();
 
         onsites(ALL) E[X].gaussian_random();
 
@@ -480,6 +517,18 @@ int main(int argc, char **argv) {
         act_new = measure_action(S, bcmsid, E, p, s_new);
 
         bool reject = hila::broadcast(exp(act_old - act_new) < hila::random());
+
+        if (trajectory < 0) {
+            // during thermalization: keep track of number of rejected trajectories
+            if (reject) {
+                ++nreject;
+                --trajectory;
+            } else {
+                if (nreject > 0) {
+                    --nreject;
+                }
+            }
+        }
 
         hila::out0 << std::setprecision(12) << "HMC " << trajectory << " S_TOT_start " << act_old
                    << " dS_TOT " << std::setprecision(6) << act_new - act_old
