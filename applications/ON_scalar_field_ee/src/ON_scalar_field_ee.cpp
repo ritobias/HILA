@@ -32,12 +32,13 @@ struct parameters {
 
 ///////////////////////////////////////////////////////////////////////////////////
 // HMC functions
-// action: S[phi] = \sum_{x} ( -\kappa/2 \sum_{\nu}( \phi(x).\phi(x+\hat{\nu}) + \phi(x).\phi(x-\hat{\nu}) + \phi(x).\phi(x) + \lambda (\phi(x).\phi(x) - 1)^2 )
+// action: S[\phi] = \sum_{x} ( -\kappa/2 \sum_{\nu}( \phi(x).\phi(x+\hat{\nu}) + \phi(x).\phi(x-\hat{\nu}) + \phi(x).\phi(x) + \lambda (\phi(x).\phi(x) - 1)^2 )
 
 
 template <typename T, typename pT, typename atype = hila::arithmetic_type<T>>
 void move_filtered_p(const Field<T> (&S)[2], const Field<pT> &bcmsid, const Direction &d, out_only Field<T> &Sd, const parameters &p) {
-
+    // pull fields from neighboring sites in d-direction, using different nn-topologies depending on local value of field bcmsid[X]
+    // (was used only for testing)
     onsites(ALL) {
         if (bcmsid[X] <= p.bcms) {
             Sd[X] = S[1][X + d];
@@ -51,6 +52,10 @@ void move_filtered_p(const Field<T> (&S)[2], const Field<pT> &bcmsid, const Dire
 template <typename T, typename pT, typename atype = hila::arithmetic_type<T>>
 void move_filtered_k(const Field<T> (&S)[2], const Field<pT> &bcmsid, const Direction &d,
                    out_only Field<T> &Sd, const parameters &p) {
+    // pull fields from neighboring sites in d-direction, using different nn-topologies for
+    // different Fourier modes, depending on the magnitude |k_s| of their spatial k-vector k_s,
+    // where |k_s| is encded in bcmsid[X].
+
     Field<Complex<atype>> tS, tSK;
     Field<Complex<atype>> SK[2];
     SK[0] = 0;
@@ -68,7 +73,7 @@ void move_filtered_k(const Field<T> (&S)[2], const Field<pT> &bcmsid, const Dire
         }
         SK[0] = tS.FFT(e_x + e_y + e_z);
         onsites(ALL) {
-            if (bcmsid[X] <= p.bcms) {
+            if (bcmsid[X] <= p.l) {
                 tSK[X] = SK[1][X + d];
             } else {
                 tSK[X] = SK[0][X + d];
@@ -97,6 +102,7 @@ double measure_s(const Field<T>(&S)[2], const Field<pT> &bcmsid, const parameter
     Reduction<double> s = 0;
     s.allreduce(false).delayed(true);
     Field<T> Sd;
+    // hopping terms in all directions:
     foralldir(d) {
         if(d != e_t) {
             onsites(ALL) {
@@ -109,6 +115,7 @@ double measure_s(const Field<T>(&S)[2], const Field<pT> &bcmsid, const parameter
             }
         }
     }
+    // potential term:
     onsites(ALL) {
         atype S2 = S[0][X].squarenorm();
         s += S2 + p.lambda * (S2 - 1.0) * (S2 - 1.0);
@@ -120,8 +127,9 @@ double measure_s(const Field<T>(&S)[2], const Field<pT> &bcmsid, const parameter
 template <typename T, typename pT, typename atype = hila::arithmetic_type<T>>
 void get_force_add(const Field<T> (&S)[2], const Field<pT> &bcmsid, Field<T> &K, atype eps,
                      const parameters &p) {
-    // compute the force
+    // compute the force F^a_x = -\delta^{a b}\frac{\delta S}{\delta\phi_x^b}
     Field<T> Sd;
+    // force from hopping terms in all directions:
     atype th = eps * p.kappa;
     foralldir(d) {
         if (d != e_t) {
@@ -136,6 +144,7 @@ void get_force_add(const Field<T> (&S)[2], const Field<pT> &bcmsid, Field<T> &K,
             onsites(ALL) K[X] += th * Sd[X];
         }
     }
+    // force from potential term:
     onsites(ALL) {
         atype S2 = S[0][X].squarenorm();
         K[X] += -eps * (2.0 + 4.0 * p.lambda * (S2 - 1.0)) * S[0][X];
@@ -144,7 +153,7 @@ void get_force_add(const Field<T> (&S)[2], const Field<pT> &bcmsid, Field<T> &K,
 
 template <typename T, typename atype = hila::arithmetic_type<T>>
 double measure_e2(const Field<T> &E) {
-    // compute gauge kinetic energy from momentum field E
+    // compute "kinetic energy" from canonical momenta
     Reduction<double> e2 = 0;
     e2.allreduce(false).delayed(true);
     onsites(ALL) e2 += E[X].squarenorm();
@@ -153,6 +162,7 @@ double measure_e2(const Field<T> &E) {
 
 template <typename T, typename atype = hila::arithmetic_type<T>>
 void update_S(Field<T> &S, const Field<T> &E, atype delta) {
+    // evolve scalar field with canonical momenta
     onsites(ALL) {
         S[X] += delta * E[X];
     }
@@ -160,23 +170,22 @@ void update_S(Field<T> &S, const Field<T> &E, atype delta) {
 
 template <typename T, typename pT, typename atype = hila::arithmetic_type<T>>
 void update_E(const Field<T>(&S)[2], const Field<pT> &bcmsid, Field<T> &E, atype delta, const parameters &p) {
-    
+    // evolve canonical momenta with force
     get_force_add(S, bcmsid, E, delta, p);
 
 }
 
 template <typename T, typename pT, typename atype = hila::arithmetic_type<T>>
 double measure_action(const Field<T> (&S)[2], const Field<pT> &bcmsid,const Field<T> &E, const parameters &p, atype &s) {
-    // measure the total action, consisting of plaquette and momentum term
+    // measure the "total action", consisting of action and "kinetic energy" term
     s = measure_s(S, bcmsid, p);
     double e2 = measure_e2(E);
     return s + e2 / 2;
 }
 
 
-template <typename T>
-void do_hmc_trajectory(Field<T> (&S)[2], const Field<size_t> &bcmsid, Field<T> &E, const parameters &p) {
-
+template <typename T, typename pT>
+void do_hmc_trajectory(Field<T> (&S)[2], const Field<pT> &bcmsid, Field<T> &E, const parameters &p) {
     // leap frog integration
 
     // start trajectory: advance U by half a time step
@@ -197,10 +206,10 @@ void do_hmc_trajectory(Field<T> (&S)[2], const Field<size_t> &bcmsid, Field<T> &
 ///////////////////////////////////////////////////////////////////////////////////
 // measurement functions
 
-template <typename T>
-void measure_stuff(Field<T> (&S)[2], const Field<size_t> &bcmsid, const parameters &p) {
-
-
+template <typename T, typename pT>
+void measure_stuff(const Field<T> (&S)[2], const Field<pT> &bcmsid, const Field<T> &E,
+                   const parameters &p) {
+    //TODO: implement measurements here
 }
 
 // end measurement functions
@@ -388,10 +397,12 @@ int main(int argc, char **argv) {
     p.s = par.get("replica number");
     // entangling region slab width
     p.l = par.get("momentum scale");
+    p.bcms = 0;
     // number of trajectories
     p.n_traj = par.get("number of trajectories");
     // hmc trajectory length
     p.trajlen = par.get("hmc trajlen");
+    // hmc trajectory step width
     p.dt = par.get("hmc step width");
     // number of thermalization trajectories
     p.n_therm = par.get("thermalization trajs");
@@ -423,25 +434,21 @@ int main(int argc, char **argv) {
     // We need random number here
     hila::seed_random(seed);
 
-    size_t Vs = lattice.volume()/lattice.size(3); // spatial lattice volume
-    size_t Ae = Vs / lattice.size(0); // area of y-z-plane (~area of connected component of entangling surface)
-
-    p.bcms = (size_t)(p.l * (ftype)Ae);
-
+    // use a field bcmsid as look-up table for the magnitude of the spatial momentum vector in
+    // Fourier space:
     Field<ftype> bcmsid = 0;
-    bcmsid.set_nn_topo(1); // full e_t-periodicity to distribute spatial bcmsid to all time slices
-    {
-        // assigne spatial bcmsid to each spatial site at e_t=0:
-        onsites(ALL) {
-            auto k = X.coordinates().convert_to_k();
-            ftype sknorm = 0;
-            for (int d = 0; d < NDIM - 1; ++d) {
-                sknorm += k[d] * k[d];
-            }
-            sknorm = sqrt(sknorm);
-            bcmsid[X] = sknorm;
+    bcmsid.set_nn_topo(1); // full e_t-periodicity (doesn't really matter, thought, since bcmsid is
+                           // the same on all time slices)
+    onsites(ALL) {
+        auto k = X.coordinates().convert_to_k();
+        ftype sknorm = 0;
+        for (int d = 0; d < NDIM - 1; ++d) {
+            sknorm += k[d] * k[d];
         }
+        sknorm = sqrt(sknorm);
+        bcmsid[X] = sknorm;
     }
+
 
     // use negative trajectory for thermal
     int start_traj = -p.n_therm;
@@ -504,6 +511,7 @@ int main(int argc, char **argv) {
         }
 
 
+        // perform HMC update:
         update_timer.start();
 
         ftype ttime = hila::gettime();
@@ -522,7 +530,7 @@ int main(int argc, char **argv) {
             // during thermalization: keep track of number of rejected trajectories
             if (reject) {
                 ++nreject;
-                --trajectory;
+                --trajectory; // repeat trajectories that were rejected during thermalization
             } else {
                 if (nreject > 0) {
                     --nreject;
@@ -546,16 +554,19 @@ int main(int argc, char **argv) {
 
         hila::out0 << "  time " << std::setprecision(3) << hila::gettime() - ttime << '\n';
 
+
+        // perform measurements:
         measure_timer.start();
 
         hila::out0 << "Measure_start " << trajectory << '\n';
 
-        measure_stuff(S, bcmsid, p);
+        measure_stuff(S, bcmsid, E, p);
 
         hila::out0 << "Measure_end " << trajectory << '\n';
 
         measure_timer.stop();
 
+        // create checkpoint (when it's time):
         if (p.n_save > 0 && (trajectory + 1) % p.n_save == 0) {
             checkpoint(S[0], trajectory, p);
         }
