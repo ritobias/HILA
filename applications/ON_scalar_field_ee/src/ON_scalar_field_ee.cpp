@@ -36,9 +36,13 @@ struct parameters {
 
 
 template <typename T, typename pT, typename atype = hila::arithmetic_type<T>>
-void move_filtered_p(const Field<T> (&S)[2], const Field<pT> &bcmsid, const Direction &d, out_only Field<T> &Sd, const parameters &p) {
+void move_filtered_p(const Field<T> (&S)[2], const Field<pT> &bcmsid, const Direction &d, bool both_dirs, out_only Field<T> &Sd, const parameters &p) {
     // pull fields from neighboring sites in d-direction, using different nn-topologies depending on local value of field bcmsid[X]
     // (was used only for testing)
+    if (both_dirs) {
+        S[1].start_gather(-d);
+        S[0].start_gather(-d);
+    }
     onsites(ALL) {
         if (bcmsid[X] <= p.bcms) {
             Sd[X] = S[1][X + d];
@@ -46,11 +50,19 @@ void move_filtered_p(const Field<T> (&S)[2], const Field<pT> &bcmsid, const Dire
             Sd[X] = S[0][X + d];
         }
     }
-
+    if (both_dirs) {
+        onsites(ALL) {
+            if (bcmsid[X] <= p.bcms) {
+                Sd[X] = S[1][X - d];
+            } else {
+                Sd[X] = S[0][X - d];
+            }
+        }
+    }
 }
 
 template <typename T, typename pT, typename atype = hila::arithmetic_type<T>>
-void move_filtered_k(const Field<T> (&S)[2], const Field<pT> &bcmsid, const Direction &d,
+void move_filtered_k(const Field<T> (&S)[2], const Field<pT> &bcmsid, const Direction &d, bool both_dirs,
                    out_only Field<T> &Sd, const parameters &p) {
     // pull fields from neighboring sites in d-direction, using different nn-topologies for
     // different Fourier modes, depending on the magnitude |k_s| of their spatial k-vector k_s,
@@ -76,11 +88,24 @@ void move_filtered_k(const Field<T> (&S)[2], const Field<pT> &bcmsid, const Dire
             }
         }
         SK[0] = tS.FFT(fftdirs);
+        if(both_dirs) {
+            SK[1].start_gather(-d);
+            SK[0].start_gather(-d);
+        }
         onsites(ALL) {
             if (bcmsid[X] <= p.l) {
                 tSK[X] = SK[1][X + d];
             } else {
                 tSK[X] = SK[0][X + d];
+            }
+        }
+        if(both_dirs) {
+            onsites(ALL) {
+                if (bcmsid[X] <= p.l) {
+                    tSK[X] += SK[1][X - d];
+                } else {
+                    tSK[X] += SK[0][X - d];
+                }
             }
         }
         tS = tSK.FFT(fftdirs, fft_direction::back) / svol;
@@ -95,10 +120,10 @@ void move_filtered_k(const Field<T> (&S)[2], const Field<pT> &bcmsid, const Dire
 }
 
 template <typename T, typename pT, typename atype = hila::arithmetic_type<T>>
-void move_filtered(const Field<T> (&S)[2], const Field<pT> &bcmsid, const Direction &d,
+void move_filtered(const Field<T> (&S)[2], const Field<pT> &bcmsid, const Direction &d, bool both_dirs,
                      out_only Field<T> &Sd, const parameters &p) {
 
-    move_filtered_k(S, bcmsid, d, Sd, p);
+    move_filtered_k(S, bcmsid, d, both_dirs, Sd, p);
 }
 
 template <typename T, typename pT, typename atype = hila::arithmetic_type<T>>
@@ -113,7 +138,7 @@ double measure_s(const Field<T>(&S)[2], const Field<pT> &bcmsid, const parameter
                 s += -p.kappa * S[0][X].dot(S[0][X + d]);
             }
         } else {
-            move_filtered(S, bcmsid, d, Sd, p);
+            move_filtered(S, bcmsid, d, false, Sd, p);
             onsites(ALL) {
                 s += -p.kappa * S[0][X].dot(Sd[X]);
             }
@@ -137,14 +162,12 @@ void get_force_add(const Field<T> (&S)[2], const Field<pT> &bcmsid, Field<T> &K,
     atype th = eps * p.kappa;
     foralldir(d) {
         if (d != e_t) {
+            S[0].start_gather(-d);
             onsites(ALL) K[X] += th * S[0][X + d];
 
             onsites(ALL) K[X] += th * S[0][X - d];
         } else {
-            move_filtered(S, bcmsid, d, Sd, p);
-            onsites(ALL) K[X] += th * Sd[X];
-
-            move_filtered(S, bcmsid, -d, Sd, p);
+            move_filtered(S, bcmsid, d, true, Sd, p);
             onsites(ALL) K[X] += th * Sd[X];
         }
     }
