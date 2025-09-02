@@ -329,10 +329,12 @@ void Field<T>::config_read(const std::string &filename) {
         foralldir(d) {
             inputfile.read(reinterpret_cast<char *>(&f), sizeof(int64_t));
             insize[d] = f;
-            ok = ok && (lattice.size(d) % insize[d] == 0);
-            if (!ok)
+            if (lattice.size(d) % insize[d] != 0) {
+                ok = false;
                 hila::out0 << conferr << "incorrect lattice dimension " << hila::prettyprint(d)
-                           << " is " << f << " should be (or divide)" << lattice.size(d) << '\n';
+                           << " is " << f << " should be (divisible by) " << lattice.size(d)
+                           << "\n";
+            }
         }
     }
 

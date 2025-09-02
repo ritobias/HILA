@@ -18,7 +18,7 @@ struct parameters {
     int s;              // number of replicas
     ftype l;            // entangling region slab width
     ftype alpha;        // interpolation parameter
-    size_t bcms;
+    ftype bcms;
     int n_traj;         // number of trajectories to generate
     int trajlen;        // HMC integration trajectory length
     ftype dt;           // HMC integration time step
@@ -308,19 +308,19 @@ public:
         }
 
         if (cn[e_y] >= lsize[e_y]) {
-            cn[e_z] += 1;
+            //cn[e_z] += 1;
             cn[e_y] = 0;
         }
         if (cn[e_y] < 0) {
-            cn[e_z] -= 1;
+            //cn[e_z] -= 1;
             cn[e_y] = lsize[e_y] - 1;
         }
         if (cn[e_z] >= lsize[e_z]) {
-            cn[e_x] += 1;
+            //cn[e_x] += 1;
             cn[e_z] = 0;
         }
         if (cn[e_z] < 0) {
-            cn[e_x] -= 1;
+            //cn[e_x] -= 1;
             cn[e_z] = lsize[e_z] - 1;
         }
         if (cn[e_x] >= lsize[e_x]) {
@@ -387,7 +387,7 @@ int main(int argc, char **argv) {
     // number of replicas
     p.s = par.get("replica number");
     // entangling region slab width
-    p.l = par.get("slab width");
+    p.l = par.get("momentum scale");
     // number of trajectories
     p.n_traj = par.get("number of trajectories");
     // hmc trajectory length
@@ -428,31 +428,20 @@ int main(int argc, char **argv) {
 
     p.bcms = (size_t)(p.l * (ftype)Ae);
 
-    Field<size_t> bcmsid = 0;
+    Field<ftype> bcmsid = 0;
     bcmsid.set_nn_topo(1); // full e_t-periodicity to distribute spatial bcmsid to all time slices
     {
         // assigne spatial bcmsid to each spatial site at e_t=0:
-        CoordinateVector c = {0, 0, 0, 0};
-        for (size_t i = 0; i < Vs; ++i) {
-            bcmsid[c] = i;
-            c = nn_map1(c, e_y);
-        }
-
-        // copy bcmsid from e_t=0 to remaining time slices:
-        for (size_t i = 1; i < lattice.size(3); ++i) {
-#pragma hila safe_access(bcmsid)
-            onsites(ALL) {
-                if(X.t() == i) {
-                    bcmsid[X] = bcmsid[X - e_t];
-                }
+        onsites(ALL) {
+            auto k = X.coordinates().convert_to_k();
+            ftype sknorm = 0;
+            for (int d = 0; d < NDIM - 1; ++d) {
+                sknorm += k[d] * k[d];
             }
+            sknorm = sqrt(sknorm);
+            bcmsid[X] = sknorm;
         }
     }
-
-    // get coordinates of spatial site with bcmsid = bcms:
-    auto bcmsc = bcms_coordinates(p.bcms, bcmsid);
-    //hila::out << "rank " << hila::myrank() << "  : bcmsc=(" << bcmsc << ")\n";
-
 
 
     // use negative trajectory for thermal
@@ -470,11 +459,11 @@ int main(int argc, char **argv) {
     hila::timer update_timer("Updates");
     hila::timer measure_timer("Measurements");
 
-    onsites(ALL) S_back[X] = S[0][X];
-
     double act_old, act_new, s_old, s_new;
 
     s_old = measure_s(S, bcmsid, p);
+
+    onsites(ALL) S_back[X] = S[0][X];
 
     for (int trajectory = start_traj; trajectory <= p.n_traj; ++trajectory) {
 
@@ -500,6 +489,7 @@ int main(int argc, char **argv) {
             onsites(ALL) S[0][X] = S_back[X];
         } else {
             hila::out0 << " ACCEPT" << " --> S " << s_new;
+            onsites(ALL) S_back[X] = S[0][X];
             s_old = s_new;
         }
 
