@@ -229,14 +229,71 @@ void do_hb_trajectory(GaugeField<T> (&U)[2], const PlaquetteField<pT> &plaq_tbc_
 
 // heat-bath functions
 ///////////////////////////////////////////////////////////////////////////////////
+// boundary update functions
+
+template <typename T, typename pT, typename atype = hila::arithmetic_type<T>>
+void do_hmc_bc_update(GaugeField<T> (&U)[2], const PlaquetteField<pT> &plaq_tbc_mode,
+                      VectorField<Algebra<T>> &E, parameters &p, const hmc_parameters &p_hmc) {
+
+    static hila::timer hmc_timer("HMC (update)");
+    hmc_timer.start();
+
+    auto alpha = p.alpha;
+
+    atype ds = 0;
+    GaugeField<T> U_old = U[0];
+
+    int ipdir = 0;
+
+    foralldir(d) onsites(ALL) E[d][X].gaussian_random();
+
+    double act_old, act_new, g_act_old, g_act_new, e_act_old, e_act_new;
+
+    act_old = measure_action(U, plaq_tbc_mode, alpha, E, p_hmc, g_act_old, e_act_old);
+
+    ftype ttime = hila::gettime();
+
+    if (alpha == 0) {
+        ipdir = 1;
+        do_interp_hmc_trajectory(U, plaq_tbc_mode, E, p_hmc, ipdir, ds);
+        alpha = 1.0;
+    } else {
+        ipdir = -1;
+        do_interp_hmc_trajectory(U, plaq_tbc_mode, E, p_hmc, ipdir, ds);
+        alpha = 0;
+    }
+
+    act_new = measure_action(U, plaq_tbc_mode, alpha, E, p_hmc, g_act_new, e_act_new);
+
+
+    bool reject = hila::broadcast(exp(-(act_new - act_old)) < hila::random());
+
+    hila::out0 << string_format(
+        "HMCUD  DIR: % 1d  S_TOT_START: % 0.6e  dS_TOT: % 0.6e  dS_GAUGE: % 0.6e  dS_MOM: % 0.6e  "
+        "dS_EXT: % 0.6e  ACCEPT: % 1d  TIME: %0.5f\n",
+        ipdir, act_old, act_new - act_old, g_act_new - g_act_old, e_act_new - e_act_old, ds,
+        (int)!reject, hila::gettime() - ttime);
+
+
+    if (reject) {
+        U[0] = U_old;
+    } else {
+        p.alpha = alpha;
+    }
+
+    hmc_timer.stop();
+}
+
+// boundary update functions
+///////////////////////////////////////////////////////////////////////////////////
 // measurement functions
 
 template <typename T, typename pT, typename atype = hila::arithmetic_type<T>>
 void do_hmc_measure(GaugeField<T> (&U)[2], const PlaquetteField<pT> &plaq_tbc_mode,
                    parameters &p, const hmc_parameters &p_hmc) {
 
-    static hila::timer hmc_timer("HMC");
-    hmc_timer.start();
+    static hila::timer hmc_ms_timer("HMC (measure)");
+    hmc_ms_timer.start();
 
     auto alpha = p.alpha;
 
@@ -278,8 +335,8 @@ void do_hmc_measure(GaugeField<T> (&U)[2], const PlaquetteField<pT> &plaq_tbc_mo
     auto act_new = measure_action(U, plaq_tbc_mode, alpha, E, p_hmc, g_act_new, e_act_new);
 
 
-    bool reject = hila::broadcast(exp(-(act_new - act_old)) < hila::random());
-    //bool reject = true;
+    //bool reject = hila::broadcast(exp(-(act_new - act_old)) < hila::random());
+    bool reject = true;
 
 
     hila::out0 << string_format("HMC    % 1d % 0.6e % 0.6e % 0.6e % 0.6e % 0.6e      % 1d    %0.5f\n", ipdir,
@@ -293,7 +350,7 @@ void do_hmc_measure(GaugeField<T> (&U)[2], const PlaquetteField<pT> &plaq_tbc_mo
         p.alpha = alpha;
     }
 
-    hmc_timer.stop();
+    hmc_ms_timer.stop();
 }
 
 
@@ -305,15 +362,16 @@ void measure_stuff(const GaugeField<T> (&U)[2], const PlaquetteField<pT> &plaq_t
     static bool first = true;
     if (first) {
         // print legend for measurement output
-        hila::out0 << "LMEAS:        plaq         dplaq\n";
+        hila::out0 << "LMEAS:        plaq         dplaq            dS\n";
         first = false;
     }
 
     auto plaqs =
         measure_s_wplaq(U, plaq_tbc_mode, p.alpha) / (lattice.volume() * NDIM * (NDIM - 1) / 2);
     auto dplaqs = measure_ds_wplaq_dbcms(U, plaq_tbc_mode) / (p.s * (NDIM - 1));
+    auto ds = dplaqs * (p.s * (NDIM - 1)) * p.beta;
 
-    hila::out0 << string_format("MEAS % 0.6e % 0.6e\n", plaqs, dplaqs);
+    hila::out0 << string_format("MEAS % 0.6e % 0.6e % 0.6e\n", plaqs, dplaqs, ds);
 }
 
 // end measurement functions
