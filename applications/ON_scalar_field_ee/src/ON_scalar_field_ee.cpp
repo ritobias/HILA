@@ -56,6 +56,10 @@ void move_filtered_k(const Field<T> (&S)[2], const Field<pT> &bcmsid, const Dire
     // different Fourier modes, depending on the magnitude |k_s| of their spatial k-vector k_s,
     // where |k_s| is encded in bcmsid[X].
 
+    // define direction in which Fourier transform should be taken
+    CoordinateVector fftdirs(0);
+    foralldir(d) if(d != e_t) fftdirs += d;
+
     Field<Complex<atype>> tS, tSK;
     Field<Complex<atype>> SK[2];
     SK[0] = 0;
@@ -71,7 +75,7 @@ void move_filtered_k(const Field<T> (&S)[2], const Field<pT> &bcmsid, const Dire
                 tS[X] = Complex<atype>(tvec[inc], 0);
             }
         }
-        SK[0] = tS.FFT(e_x + e_y + e_z);
+        SK[0] = tS.FFT(fftdirs);
         onsites(ALL) {
             if (bcmsid[X] <= p.l) {
                 tSK[X] = SK[1][X + d];
@@ -79,7 +83,7 @@ void move_filtered_k(const Field<T> (&S)[2], const Field<pT> &bcmsid, const Dire
                 tSK[X] = SK[0][X + d];
             }
         }
-        tS = tSK.FFT(e_x + e_y + e_z, fft_direction::back) / svol;
+        tS = tSK.FFT(fftdirs, fft_direction::back) / svol;
         onsites(ALL) {
             Complex<atype> tc = tS[X];
             Sd[X][inc] = tc.real();
