@@ -737,7 +737,9 @@ int main(int argc, char **argv) {
 
         measure_stuff(U, plaq_tbc_mode, p);
 
-        do_hmc_measure(U, plaq_tbc_mode, p, p_hmc);
+        if (trajectory >= 0) {
+            do_hmc_measure(U, plaq_tbc_mode, p, p_hmc);
+        }
 
         hila::out0 << "Measure_end " << trajectory << '\n';
 
