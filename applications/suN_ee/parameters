@@ -7,7 +7,7 @@ slab width             2.5
 number of trajectories 220
 updates in trajectory  10
 overrelax steps        10
-thermalization trajs   10
+thermalization trajs   100
 hmc trajlen            200
 hmc step width         0.01
 gflow freq             0

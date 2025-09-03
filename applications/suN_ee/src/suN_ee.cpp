@@ -306,7 +306,7 @@ void do_hmc_measure(GaugeField<T> (&U)[2], const PlaquetteField<pT> &plaq_tbc_mo
     if (first) {
         // print legend for measurement output
         hila::out0 << "LHMC: DIR       S_TOT_S        dS_TOT       dS_PLAQ        dE_KIN        dS_EXT"
-                      "    SUCC        TIME\n";
+                      "     SUCC       TIME\n";
         first = false;
     }
 
@@ -339,7 +339,7 @@ void do_hmc_measure(GaugeField<T> (&U)[2], const PlaquetteField<pT> &plaq_tbc_mo
     bool reject = true;
 
 
-    hila::out0 << string_format("HMC    % 1d % 0.6e % 0.6e % 0.6e % 0.6e % 0.6e      % 1d    %0.5f\n", ipdir,
+    hila::out0 << string_format("HMC    % 1d % 0.6e % 0.6e % 0.6e % 0.6e % 0.6e       % 1d % 10.5f\n", ipdir,
                                 act_old, act_new - act_old, g_act_new - g_act_old,
                                 e_act_new - e_act_old, ds, (int)!reject, hila::gettime() - ttime);
 
