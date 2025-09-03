@@ -5,8 +5,8 @@ beta                   10.79191
 replica number         2
 slab width             2.5
 number of trajectories 220
-updates in trajectory  10
-overrelax steps        10
+heatbath updates       10
+overrelax updates      10
 thermalization trajs   100
 hmc trajlen            200
 hmc step width         0.01

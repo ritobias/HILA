@@ -562,9 +562,9 @@ int main(int argc, char **argv) {
     // number of trajectories
     p.n_traj = par.get("number of trajectories");
     // number of heat-bath (HB) sweeps per trajectory
-    p.n_update = par.get("updates in trajectory");
+    p.n_update = par.get("heatbath updates");
     // number of overrelaxation sweeps petween HB sweeps
-    p.n_overrelax = par.get("overrelax steps");
+    p.n_overrelax = par.get("overrelax updates");
     // number of thermalization trajectories
     p.n_therm = par.get("thermalization trajs");
     // hmc trajectory length
