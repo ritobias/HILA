@@ -306,7 +306,7 @@ void do_hmc_measure(GaugeField<T> (&U)[2], const PlaquetteField<pT> &plaq_tbc_mo
     if (first) {
         // print legend for measurement output
         hila::out0 << "LHMC: DIR       S_TOT_S        dS_TOT       dS_PLAQ        dE_KIN        dS_EXT"
-                      "    SUCC       TIME\n";
+                      "    SUCC        TIME\n";
         first = false;
     }
 
@@ -569,7 +569,8 @@ int main(int argc, char **argv) {
     p.n_therm = par.get("thermalization trajs");
     // hmc trajectory length
     p_hmc.trajlen = par.get("hmc trajlen");
-    p_hmc.dt = 1.0 / p_hmc.trajlen;
+    // hmc integration step width
+    p_hmc.dt = par.get("hmc step width");
     // wilson flow frequency (number of traj. between w. flow measurement)
     p.gflow_freq = par.get("gflow freq");
     // wilson flow max. flow-distance
