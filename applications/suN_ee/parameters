@@ -8,8 +8,7 @@ number of trajectories 220
 heatbath updates       10
 overrelax updates      10
 thermalization trajs   100
-hmc trajlen            200
-hmc step width         0.01
+interpolation steps    100
 gflow freq             0
 gflow max lambda       0
 gflow lambda step      0.1
