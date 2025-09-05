@@ -16,6 +16,14 @@ const static int prime[NPRIMES] = {2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37};
  * Print info to outf as we proceed
  */
 
+size_t lattice_struct::block_boundary_size(const CoordinateVector &blsiz) {
+    size_t tsa = 0;
+    size_t tvol = 1;
+    foralldir(d) tvol *= blsiz[d];
+    foralldir(d) tsa += tvol / blsiz[d];
+    return 2 * tsa;
+}
+
 void lattice_struct::setup_layout() {
     int nfactors[NPRIMES];
     CoordinateVector nodesiz;
@@ -74,77 +82,145 @@ void lattice_struct::setup_layout() {
     }
 
     int mdir = 0;
-    bool secondtime = false;
-    do {
-        // try the division a couple of times, if the 1st fails
 
-        foralldir(j) if (ghosts[mdir] > ghosts[j]) mdir = j;
-        // mdir is the direction where we do uneven division (if done)
-        // hila::out0 << "MDIR " << mdir << " ghosts mdir " << ghosts[mdir] << " nsize " <<
-        // nsize[mdir] << '\n';
+    foralldir(j) if (ghosts[mdir] > ghosts[j]) mdir = j;
+    // mdir is the direction where we do uneven division (if done)
+    // hila::out0 << "MDIR " << mdir << " ghosts mdir " << ghosts[mdir] << " nsize " <<
+    // nsize[mdir] << '\n';
 
+    if(1) {
+        size_t g_lvol = 1;
         foralldir(i) {
             nodesiz[i] = (i == mdir) ? nsize[i] : size(i); // start with ghosted lattice size
             nodes.n_divisions[i] = 1;
+            g_lvol *= nodesiz[i];
+        }
+        size_t g_nvol = g_lvol / nn;  // node volume
+
+        // find node shape that minimizes boundary:
+        std::vector<size_t> fx(NDIM);
+        CoordinateVector tNx;
+        std::vector<std::vector<int>> nlxp(NDIM); //list of possible side lengths
+        foralldir(d) {
+            int maxi = nodesiz[d];
+            for (int i = 1; i <= maxi; ++i) {
+                if(nodesiz[d] % i == 0 && nn % i == 0) {
+                    nlxp[d].push_back(nodesiz[d] / i);
+                }
+            }
+            fx[d] = 0;
+            tNx[d] = nodesiz[d]; //initial size is full (ghosted) lattice
         }
 
-        for (int n = NPRIMES - 1; n >= 0; n--)
-            for (int i = 0; i < nfactors[n]; i++) {
-                // figure out which direction to divide -- start from the largest prime,
-                // because we don't want this to be last divisor! (would probably wind up
-                // with size 1)
-
-                // find largest divisible dimension of h-cubes - start from last, because
-                int msize = 1, dir;
-                for (dir = 0; dir < NDIM; dir++)
-                    if (nodesiz[dir] > msize && nodesiz[dir] % prime[n] == 0)
-                        msize = nodesiz[dir];
-
-                // if one direction with largest dimension has already been
-                // divided, divide it again.  Otherwise divide first direction
-                // with largest dimension.
-
-                // Switch here to first divide along t-direction, in
-                // order to
-                // a) minimize spatial blocks
-                // b) In sf t-division is cheaper (1 non-communicating slice)
-
-                for (dir = NDIM - 1; dir >= 0; dir--)
-                    if (nodesiz[dir] == msize && nodes.n_divisions[dir] > 1 &&
-                        nodesiz[dir] % prime[n] == 0)
-                        break;
-
-                // If not previously sliced, take one direction to slice
-                if (dir < 0)
-                    for (dir = NDIM - 1; dir >= 0; dir--)
-                        if (nodesiz[dir] == msize && nodesiz[dir] % prime[n] == 0)
-                            break;
-
-                if (dir < 0) {
-                    // This cannot happen
-                    hila::out0 << "CANNOT HAPPEN! in setup_layout_generic.c\n";
-                    hila::finishrun();
+        size_t minbndry = block_boundary_size(tNx); //initial boundary size
+        size_t ttV, tbndry;
+        // now run through all shapes that can be formed with the side lengths listed in nlxp:
+        while (true) {
+            ttV = 1;
+            foralldir(d) ttV *= nlxp[d][fx[d]];
+            if(ttV == g_nvol) {
+                // shape fits the node volume
+                foralldir(d) tNx[d] = nlxp[d][fx[d]];
+                tbndry = block_boundary_size(tNx);
+                if(tbndry < minbndry) {
+                    // boundary of current shape is smaller than minbndry
+                    //  -> update minbndry and nodesiz to current shape
+                    minbndry = tbndry;
+                    nodesiz = tNx;
                 }
-
-                // Now slice it
-                nodesiz[dir] /= prime[n];
-                nodes.n_divisions[dir] *= prime[n];
             }
 
-        // now check that the div makes sens
-        bool fail = false;
-        foralldir(dir) if (nodesiz[dir] < 2) fail = true; // don't allow nodes of size 1
-        if (fail && !secondtime) {
-            secondtime = true;
-            ghosts[mdir] =
-                (1ULL << 62); // this short-circuits direction mdir, some other taken next
-        } else if (fail) {
-            hila::out0 << "Could not successfully lay out the lattice with "
-                       << hila::number_of_nodes() << " nodes\n";
-            hila::finishrun();
+            // determine next shape in nlxp:
+            ++fx[0];
+            for (int d = 0; d < NDIM - 1; ++d) {
+                if(fx[d] >= nlxp[d].size()) {
+                    ++fx[d + 1];
+                    fx[d] = 0;
+                }
+            }
+            if(fx[NDIM - 1] >= nlxp[NDIM - 1].size()) {
+                // no more shapes left
+                break;
+            }
         }
 
-    } while (secondtime);
+        // required number of divisions per direction to produce optimal node shape:
+        foralldir(d) {
+            if(d == mdir) {
+                nodes.n_divisions[d] = nsize[d] / nodesiz[d];
+            } else {
+                nodes.n_divisions[d] = size(d) / nodesiz[d];
+            }
+        }
+    } else {
+        bool secondtime = false;
+        do {
+            // try the division a couple of times, if the 1st fails
+
+            foralldir(i) {
+                nodesiz[i] = (i == mdir) ? nsize[i] : size(i); // start with ghosted lattice size
+                nodes.n_divisions[i] = 1;
+            }
+
+            for (int n = NPRIMES - 1; n >= 0; n--) {
+                for (int i = 0; i < nfactors[n]; i++) {
+                    // figure out which direction to divide -- start from the largest prime,
+                    // because we don't want this to be last divisor! (would probably wind up
+                    // with size 1)
+
+                    // find largest divisible dimension of h-cubes - start from last, because
+                    int msize = 1, dir;
+                    for (dir = 0; dir < NDIM; dir++)
+                        if (nodesiz[dir] > msize && nodesiz[dir] % prime[n] == 0)
+                            msize = nodesiz[dir];
+
+                    // if one direction with largest dimension has already been
+                    // divided, divide it again.  Otherwise divide first direction
+                    // with largest dimension.
+
+                    // Switch here to first divide along t-direction, in
+                    // order to
+                    // a) minimize spatial blocks
+                    // b) In sf t-division is cheaper (1 non-communicating slice)
+
+                    for (dir = NDIM - 1; dir >= 0; dir--)
+                        if (nodesiz[dir] == msize && nodes.n_divisions[dir] > 1 &&
+                            nodesiz[dir] % prime[n] == 0)
+                            break;
+
+                    // If not previously sliced, take one direction to slice
+                    if (dir < 0)
+                        for (dir = NDIM - 1; dir >= 0; dir--)
+                            if (nodesiz[dir] == msize && nodesiz[dir] % prime[n] == 0)
+                                break;
+
+                    if (dir < 0) {
+                        // This cannot happen
+                        hila::out0 << "CANNOT HAPPEN! in setup_layout_generic.c\n";
+                        hila::finishrun();
+                    }
+
+                    // Now slice it
+                    nodesiz[dir] /= prime[n];
+                    nodes.n_divisions[dir] *= prime[n];
+                }
+            }
+
+            // now check that the div makes sens
+            bool fail = false;
+            foralldir(dir) if (nodesiz[dir] < 2) fail = true; // don't allow nodes of size 1
+            if (fail && !secondtime) {
+                secondtime = true;
+                ghosts[mdir] =
+                    (1ULL << 62); // this short-circuits direction mdir, some other taken next
+            } else if (fail) {
+                hila::out0 << "Could not successfully lay out the lattice with "
+                        << hila::number_of_nodes() << " nodes\n";
+                hila::finishrun();
+            }
+
+        } while (secondtime);
+    }
 
     // set up struct nodes variables
     nodes.number = hila::number_of_nodes();

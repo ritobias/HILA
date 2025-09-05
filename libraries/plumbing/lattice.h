@@ -261,6 +261,7 @@ class lattice_struct {
 #endif
 
     void setup(const CoordinateVector &siz);
+    size_t block_boundary_size(const CoordinateVector &blsiz);
     void setup_layout();
     void setup_nodes();
 

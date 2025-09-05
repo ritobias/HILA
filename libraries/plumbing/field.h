@@ -326,8 +326,9 @@ class Field {
 #endif
         fs = nullptr; // lazy allocation on 1st use
         is_ref_of = nullptr;
+        has_refs.resize(lattice.nn_map.size());
         for (int i = 0; i < lattice.nn_map.size(); ++i) {
-            has_refs.push_back(nullptr);
+            has_refs[i] = nullptr;
         }
     }
     /**
