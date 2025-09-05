@@ -64,52 +64,54 @@ void lattice_struct::setup_layout() {
 
     int64_t remainder = l_volume % nn; // remainder = 0 even division
 
-    // strategy: try to increase the box size to one of the directions until rem = 0
-    // find the optimal direction to do it
-    // Use simple heuristic: take the dim with the least amount of added "ghost sites"
 
-    CoordinateVector nsize;
-    int64_t ghosts[NDIM]; // int is too small
-
-    foralldir(d) {
-        int64_t cosize = l_volume / size(d);
-        int64_t n = size(d);
-        while ((n * cosize) % nn != 0)
-            n++; // virtual size can be odd
-        // now nsize is the new would-be size
-        ghosts[d] = (n - size(d)) * cosize;
-        nsize[d] = n;
-    }
-
-    int mdir = 0;
-
-    foralldir(j) if (ghosts[mdir] > ghosts[j]) mdir = j;
-    // mdir is the direction where we do uneven division (if done)
-    // hila::out0 << "MDIR " << mdir << " ghosts mdir " << ghosts[mdir] << " nsize " <<
-    // nsize[mdir] << '\n';
 
     if(1) {
-        size_t g_lvol = 1;
-        foralldir(i) {
-            nodesiz[i] = (i == mdir) ? nsize[i] : size(i); // start with ghosted lattice size
-            nodes.n_divisions[i] = 1;
-            g_lvol *= nodesiz[i];
+
+        size_t g_lvol = 2 * l_volume;
+        size_t min_ghosts = 0;
+        foralldir(d) {
+            size_t cosize = l_volume / size(d);
+            size_t n = size(d);
+            while ((n * cosize) % nn != 0)
+                n++; // virtual size can be odd
+            size_t tghosts = n - size(d);
+            if (tghosts > 0 && n * cosize < g_lvol) {
+                min_ghosts = tghosts;
+                g_lvol = n * cosize;
+            }
         }
-        size_t g_nvol = g_lvol / nn;  // node volume
+
+        size_t max_ghosts_pd = min_ghosts;
+        if(max_ghosts_pd == 0) {
+            max_ghosts_pd = 1;
+        }
+
+        foralldir(i) {
+            nodesiz[i] = size(i); // start with ghosted lattice size
+            nodes.n_divisions[i] = 1;
+        }
+        double g_nvol = (double)l_volume / (double)nn;  // node volume
+        double g_nvol_max = g_lvol / nn;
 
         // find node shape that minimizes boundary:
         std::vector<size_t> fx(NDIM);
-        CoordinateVector tNx;
+        CoordinateVector tNx, tndiv;
         std::vector<std::vector<int>> nlxp(NDIM); //list of possible side lengths
+        std::vector<std::vector<int>> ndivlxp(NDIM); // corresponding list of divisions
         foralldir(d) {
-            int maxi = nodesiz[d];
-            for (int i = 1; i <= maxi; ++i) {
-                if(nodesiz[d] % i == 0 && nn % i == 0) {
-                    nlxp[d].push_back(nodesiz[d] / i);
+            for (int gd = 0; gd <= max_ghosts_pd; ++gd) {
+                int maxi = nodesiz[d] + gd;
+                for (int i = 1; i <= maxi; ++i) {
+                    if((nodesiz[d] + gd) % i == 0 && nn % i == 0) {
+                        nlxp[d].push_back((nodesiz[d] + gd) / i);
+                        ndivlxp[d].push_back(i);
+                    }
                 }
             }
             fx[d] = 0;
-            tNx[d] = nodesiz[d]; //initial size is full (ghosted) lattice
+            tNx[d] = nodesiz[d] + max_ghosts_pd; //initial size is full (maximally ghosted) lattice
+            tndiv[d] = 1;
         }
 
         size_t minbndry = block_boundary_size(tNx); //initial boundary size
@@ -118,15 +120,19 @@ void lattice_struct::setup_layout() {
         while (true) {
             ttV = 1;
             foralldir(d) ttV *= nlxp[d][fx[d]];
-            if(ttV == g_nvol) {
+            if (ttV >= g_nvol && ttV <= 1.1 * g_nvol_max) {
                 // shape fits the node volume
-                foralldir(d) tNx[d] = nlxp[d][fx[d]];
+                foralldir(d) {
+                    tNx[d] = nlxp[d][fx[d]];
+                    tndiv[d] = ndivlxp[d][fx[d]];
+                }
                 tbndry = block_boundary_size(tNx);
                 if(tbndry < minbndry) {
                     // boundary of current shape is smaller than minbndry
                     //  -> update minbndry and nodesiz to current shape
                     minbndry = tbndry;
                     nodesiz = tNx;
+                    nodes.n_divisions = tndiv;
                 }
             }
 
@@ -144,15 +150,96 @@ void lattice_struct::setup_layout() {
             }
         }
 
-        // required number of divisions per direction to produce optimal node shape:
+        // set up struct nodes variables
+        nodes.number = hila::number_of_nodes();
+        foralldir(dir) {
+            nodes.divisors[dir].resize(nodes.n_divisions[dir] + 1);
+            // Node divisors: note, this MUST BE compatible with
+            // node_rank in lattice.cpp
+            // to be sure, we use naively the same method than in node_rank
+            // last element will be size(dir), for convenience
+            int n = -1;
+            for (int i = 0; i <= size(dir); i++)
+                if ((i * nodes.n_divisions[dir]) / size(dir) != n) {
+                    ++n;
+                    nodes.divisors[dir][n] = i;
+                }
+            // hila::out0 << "Divisors ";
+            // for (int i=0;i<nodes.n_divisions[dir]; i++) hila::out0 << nodes.divisors[dir][i]
+            // << " "; hila::out0 << '\n';
+        }
+        CoordinateVector ghost_slices;
         foralldir(d) {
-            if(d == mdir) {
-                nodes.n_divisions[d] = nsize[d] / nodesiz[d];
-            } else {
-                nodes.n_divisions[d] = size(d) / nodesiz[d];
+            ghost_slices[d] = nodes.n_divisions[d] * nodesiz[d] - size(d);
+            if (ghost_slices[d] > 0) {
+                hila::out0 << "\nUsing uneven node division to direction " << d << ":\n";
+                hila::out0 << "Divisions: ";
+                for (int i = 0; i < nodes.n_divisions[d]; i++) {
+                    if (i > 0)
+                        hila::out0 << " - ";
+                    hila::out0 << nodes.divisors[d][i + 1] - nodes.divisors[d][i];
+                }
+                hila::out0 << "\nFilling efficiency: " << (100.0 * size(d)) / (size(d) + ghost_slices[d]) << "%\n";
+
+                if (ghost_slices[d] > nodes.n_divisions[d] / 2)
+                    hila::out0 << "NOTE: number of smaller nodes > large nodes \n";
             }
         }
+
+        // this was hila::number_of_nodes() > 1
+        if (1) {
+            hila::out0 << "\nSites on node: ";
+            foralldir(d) {
+                if (d > 0)
+                    hila::out0 << " x ";
+                if (ghost_slices[d] > 0)
+                    hila::out0 << '(' << size(d) / nodes.n_divisions[d] << '-' << nodesiz[d] << ')';
+                else
+                    hila::out0 << nodesiz[d];
+            }
+            int ns = 1;
+            foralldir(d) ns *= nodesiz[d];
+            int ns2 = 1;
+            foralldir(d) ns2 *= size(d) / nodes.n_divisions[d];
+            if(ns2 != ns) {
+                hila::out0 << "  =  " << ns2 << " - " << ns << '\n';
+            } else {
+                hila::out0 << "  =  " << ns << '\n';
+            }
+
+            hila::out0 << "Processor layout: ";
+            foralldir(d) {
+                if (d > 0)
+                    hila::out0 << " x ";
+                hila::out0 << nodes.n_divisions[d];
+            }
+            hila::out0 << "  =  " << hila::number_of_nodes() << " nodes\n";
+        }
     } else {
+        // strategy: try to increase the box size to one of the directions until rem = 0
+        // find the optimal direction to do it
+        // Use simple heuristic: take the dim with the least amount of added "ghost sites"
+
+        CoordinateVector nsize;
+        int64_t ghosts[NDIM]; // int is too small
+
+        foralldir(d) {
+            int64_t cosize = l_volume / size(d);
+            int64_t n = size(d);
+            while ((n * cosize) % nn != 0)
+                n++; // virtual size can be odd
+            // now nsize is the new would-be size
+            ghosts[d] = (n - size(d)) * cosize;
+            nsize[d] = n;
+        }
+
+        int mdir = 0;
+
+        foralldir(j) if (ghosts[mdir] > ghosts[j]) mdir = j;
+        // mdir is the direction where we do uneven division (if done)
+        // hila::out0 << "MDIR " << mdir << " ghosts mdir " << ghosts[mdir] << " nsize " <<
+        // nsize[mdir] << '\n';
+
         bool secondtime = false;
         do {
             // try the division a couple of times, if the 1st fails
@@ -220,74 +307,78 @@ void lattice_struct::setup_layout() {
             }
 
         } while (secondtime);
-    }
 
-    // set up struct nodes variables
-    nodes.number = hila::number_of_nodes();
-    foralldir(dir) {
-        nodes.divisors[dir].resize(nodes.n_divisions[dir] + 1);
-        // Node divisors: note, this MUST BE compatible with
-        // node_rank in lattice.cpp
-        // to be sure, we use naively the same method than in node_rank
-        // last element will be size(dir), for convenience
-        int n = -1;
-        for (int i = 0; i <= size(dir); i++)
-            if ((i * nodes.n_divisions[dir]) / size(dir) != n) {
-                ++n;
-                nodes.divisors[dir][n] = i;
-            }
-        // hila::out0 << "Divisors ";
-        // for (int i=0;i<nodes.n_divisions[dir]; i++) hila::out0 << nodes.divisors[dir][i]
-        // << " "; hila::out0 << '\n';
-    }
-
-    // Now division done - check how good it is
-    int ghost_slices = nsize[mdir] - size(mdir);
-    if (ghost_slices > 0) {
-        hila::out0 << "\nUsing uneven node division to direction " << mdir << ":\n";
-        hila::out0 << "Lengths: " << nodes.n_divisions[mdir] - ghost_slices << " * ("
-                   << nodesiz[mdir] << " sites) + " << ghost_slices << " * (" << nodesiz[mdir] - 1
-                   << " sites)\n";
-        hila::out0 << "Divisions: ";
-        for (int i = 0; i < nodes.n_divisions[mdir]; i++) {
-            if (i > 0)
-                hila::out0 << " - ";
-            hila::out0 << nodes.divisors[mdir][i + 1] - nodes.divisors[mdir][i];
-        }
-        hila::out0 << "\nFilling efficiency: " << (100.0 * size(mdir)) / nsize[mdir] << "%\n";
-
-        if (ghost_slices > nodes.n_divisions[mdir] / 2)
-            hila::out0 << "NOTE: number of smaller nodes > large nodes \n";
-    }
-
-    // this was hila::number_of_nodes() > 1
-    if (1) {
-        hila::out0 << "\nSites on node: ";
+        // set up struct nodes variables
+        nodes.number = hila::number_of_nodes();
         foralldir(dir) {
-            if (dir > 0)
-                hila::out0 << " x ";
-            if (dir == mdir && ghost_slices > 0)
-                hila::out0 << '(' << nodesiz[dir] - 1 << '-' << nodesiz[dir] << ')';
-            else
-                hila::out0 << nodesiz[dir];
+            nodes.divisors[dir].resize(nodes.n_divisions[dir] + 1);
+            // Node divisors: note, this MUST BE compatible with
+            // node_rank in lattice.cpp
+            // to be sure, we use naively the same method than in node_rank
+            // last element will be size(dir), for convenience
+            int n = -1;
+            for (int i = 0; i <= size(dir); i++)
+                if ((i * nodes.n_divisions[dir]) / size(dir) != n) {
+                    ++n;
+                    nodes.divisors[dir][n] = i;
+                }
+            // hila::out0 << "Divisors ";
+            // for (int i=0;i<nodes.n_divisions[dir]; i++) hila::out0 << nodes.divisors[dir][i]
+            // << " "; hila::out0 << '\n';
         }
-        int ns = 1;
-        foralldir(dir) ns *= nodesiz[dir];
+
+        // Now division done - check how good it is
+        int ghost_slices = nsize[mdir] - size(mdir);
         if (ghost_slices > 0) {
-            int ns2 = ns * (nodesiz[mdir] - 1) / nodesiz[mdir];
-            hila::out0 << "  =  " << ns2 << " - " << ns << '\n';
-        } else {
-            hila::out0 << "  =  " << ns << '\n';
+            hila::out0 << "\nUsing uneven node division to direction " << mdir << ":\n";
+            hila::out0 << "Lengths: " << nodes.n_divisions[mdir] - ghost_slices << " * ("
+                       << nodesiz[mdir] << " sites) + " << ghost_slices << " * ("
+                       << nodesiz[mdir] - 1 << " sites)\n";
+            hila::out0 << "Divisions: ";
+            for (int i = 0; i < nodes.n_divisions[mdir]; i++) {
+                if (i > 0)
+                    hila::out0 << " - ";
+                hila::out0 << nodes.divisors[mdir][i + 1] - nodes.divisors[mdir][i];
+            }
+            hila::out0 << "\nFilling efficiency: " << (100.0 * size(mdir)) / nsize[mdir] << "%\n";
+
+            if (ghost_slices > nodes.n_divisions[mdir] / 2)
+                hila::out0 << "NOTE: number of smaller nodes > large nodes \n";
         }
 
-        hila::out0 << "Processor layout: ";
-        foralldir(dir) {
-            if (dir > 0)
-                hila::out0 << " x ";
-            hila::out0 << nodes.n_divisions[dir];
+        // this was hila::number_of_nodes() > 1
+        if (1) {
+            hila::out0 << "\nSites on node: ";
+            foralldir(dir) {
+                if (dir > 0)
+                    hila::out0 << " x ";
+                if (dir == mdir && ghost_slices > 0)
+                    hila::out0 << '(' << nodesiz[dir] - 1 << '-' << nodesiz[dir] << ')';
+                else
+                    hila::out0 << nodesiz[dir];
+            }
+            int ns = 1;
+            foralldir(dir) ns *= nodesiz[dir];
+            if (ghost_slices > 0) {
+                int ns2 = ns * (nodesiz[mdir] - 1) / nodesiz[mdir];
+                hila::out0 << "  =  " << ns2 << " - " << ns << '\n';
+            } else {
+                hila::out0 << "  =  " << ns << '\n';
+            }
+
+            hila::out0 << "Processor layout: ";
+            foralldir(dir) {
+                if (dir > 0)
+                    hila::out0 << " x ";
+                hila::out0 << nodes.n_divisions[dir];
+            }
+            hila::out0 << "  =  " << hila::number_of_nodes() << " nodes\n";
         }
-        hila::out0 << "  =  " << hila::number_of_nodes() << " nodes\n";
     }
+
+
+
+
 
     // For MPI, remap the nodes for periodic torus
     // in the desired manner
