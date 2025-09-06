@@ -68,21 +68,20 @@ void lattice_struct::setup_layout() {
 
     if(1) {
 
-        size_t g_lvol = 2 * l_volume;
-        size_t min_ghosts = 0;
+        size_t g_lvol = l_volume;
+        size_t max_ghosts_pd = 0;
         foralldir(d) {
             size_t cosize = l_volume / size(d);
             size_t n = size(d);
             while ((n * cosize) % nn != 0)
                 n++; // virtual size can be odd
             size_t tghosts = n - size(d);
-            if (tghosts > 0 && n * cosize < g_lvol) {
-                min_ghosts = tghosts;
+            if(tghosts > max_ghosts_pd) {
+                max_ghosts_pd = tghosts;
                 g_lvol = n * cosize;
             }
         }
 
-        size_t max_ghosts_pd = min_ghosts;
         if(max_ghosts_pd == 0) {
             max_ghosts_pd = 1;
         }
@@ -101,10 +100,10 @@ void lattice_struct::setup_layout() {
         std::vector<std::vector<int>> ndivlxp(NDIM); // corresponding list of divisions
         foralldir(d) {
             for (int gd = 0; gd <= max_ghosts_pd; ++gd) {
-                int maxi = nodesiz[d] + gd;
-                for (int i = 1; i <= maxi; ++i) {
-                    if((nodesiz[d] + gd) % i == 0 && nn % i == 0) {
-                        nlxp[d].push_back((nodesiz[d] + gd) / i);
+                size_t maxsiz = nodesiz[d] + gd;
+                for (size_t i = 1; i <= maxsiz; ++i) {
+                    if(maxsiz % i == 0 && nn % i == 0) {
+                        nlxp[d].push_back(maxsiz / i);
                         ndivlxp[d].push_back(i);
                     }
                 }
