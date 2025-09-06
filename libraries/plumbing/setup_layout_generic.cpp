@@ -79,11 +79,6 @@ void lattice_struct::setup_layout() {
             if(tghosts > max_ghosts_pd) {
                 max_ghosts_pd = tghosts;
             }
-            hila::out0 << d << " : " << tghosts << " : " << max_ghosts_pd << "\n";
-        }
-
-        if(max_ghosts_pd == 0) {
-            max_ghosts_pd = 1;
         }
 
         double g_nvol = (double)l_volume / (double)nn;  // node volume
