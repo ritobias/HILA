@@ -69,7 +69,6 @@ void lattice_struct::setup_layout() {
 
     if(1) {
 
-        size_t g_lvol = l_volume;
         size_t max_ghosts_pd = 0;
         foralldir(d) {
             size_t cosize = l_volume / size(d);
@@ -81,9 +80,6 @@ void lattice_struct::setup_layout() {
                 max_ghosts_pd = tghosts;
             }
             hila::out0 << d << " : " << tghosts << " : " << max_ghosts_pd << "\n";
-            if (n * cosize > g_lvol) {
-                g_lvol = n * cosize;
-            }
         }
 
         if(max_ghosts_pd == 0) {
@@ -91,7 +87,6 @@ void lattice_struct::setup_layout() {
         }
 
         double g_nvol = (double)l_volume / (double)nn;  // node volume
-        double g_nvol_max = (double)g_lvol / (double)nn;
 
         // find node shape that minimizes boundary:
         std::vector<size_t> fx(NDIM);
@@ -118,7 +113,7 @@ void lattice_struct::setup_layout() {
         size_t minbndry = block_boundary_size(tNx); //initial boundary size
         size_t minV = 1;
         foralldir(d) minV *= tNx[d];
-        size_t ttV, tbndry, tbdvolr;
+        size_t ttV, tbndry;
         bool succ = false;
         // now run through all shapes that can be formed with the side lengths listed in nlxp:
         while (true) {
@@ -128,7 +123,7 @@ void lattice_struct::setup_layout() {
                 tndiv[d] = ndivlxp[d][fx[d]];
                 ttV *= tNx[d];
             }
-            if ((double)ttV >= g_nvol && (double)ttV <= 1.3 * g_nvol_max) {
+            if ((double)ttV >= g_nvol) {
                 // shape fits the node volume
                 tbndry = block_boundary_size(tNx);
                 if (ttV < minV || (ttV == minV && tbndry < minbndry)) {
