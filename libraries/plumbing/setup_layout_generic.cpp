@@ -20,6 +20,7 @@ size_t lattice_struct::block_boundary_size(const CoordinateVector &blsiz) {
     size_t tsa = 0;
     size_t tvol = 1;
     foralldir(d) tvol *= blsiz[d];
+    assert(tvol > 0 && "tvol=0 in lattice_struct::block_boundary_size()");
     foralldir(d) tsa += tvol / blsiz[d];
     return 2 * tsa;
 }
@@ -78,6 +79,9 @@ void lattice_struct::setup_layout() {
             size_t tghosts = n - size(d);
             if(tghosts > max_ghosts_pd) {
                 max_ghosts_pd = tghosts;
+            }
+            hila::out0 << d << " : " << tghosts << " : " << max_ghosts_pd << "\n";
+            if (n * cosize > g_lvol) {
                 g_lvol = n * cosize;
             }
         }
@@ -86,12 +90,8 @@ void lattice_struct::setup_layout() {
             max_ghosts_pd = 1;
         }
 
-        foralldir(i) {
-            nodesiz[i] = size(i); // start with ghosted lattice size
-            nodes.n_divisions[i] = 1;
-        }
         double g_nvol = (double)l_volume / (double)nn;  // node volume
-        double g_nvol_max = g_lvol / nn;
+        double g_nvol_max = (double)g_lvol / (double)nn;
 
         // find node shape that minimizes boundary:
         std::vector<size_t> fx(NDIM);
@@ -100,8 +100,8 @@ void lattice_struct::setup_layout() {
         std::vector<std::vector<int>> ndivlxp(NDIM); // corresponding list of divisions
         foralldir(d) {
             for (int gd = 0; gd <= max_ghosts_pd; ++gd) {
-                size_t maxsiz = nodesiz[d] + gd;
-                for (size_t i = 1; i <= maxsiz; ++i) {
+                size_t maxsiz = size(d) + gd;
+                for (size_t i = 1; i < maxsiz; ++i) {
                     if(maxsiz % i == 0 && nn % i == 0) {
                         nlxp[d].push_back(maxsiz / i);
                         ndivlxp[d].push_back(i);
@@ -109,29 +109,36 @@ void lattice_struct::setup_layout() {
                 }
             }
             fx[d] = 0;
-            tNx[d] = nodesiz[d] + max_ghosts_pd; //initial size is full (maximally ghosted) lattice
+            tNx[d] = size(d) + max_ghosts_pd; // initial size is full (maximally ghosted) lattice
             tndiv[d] = 1;
         }
 
+        nodesiz = tNx;
+        nodes.n_divisions = tndiv;
         size_t minbndry = block_boundary_size(tNx); //initial boundary size
-        size_t ttV, tbndry;
+        size_t minV = 1;
+        foralldir(d) minV *= tNx[d];
+        size_t ttV, tbndry, tbdvolr;
+        bool succ = false;
         // now run through all shapes that can be formed with the side lengths listed in nlxp:
         while (true) {
             ttV = 1;
-            foralldir(d) ttV *= nlxp[d][fx[d]];
-            if (ttV >= g_nvol && ttV <= 1.1 * g_nvol_max) {
+            foralldir(d) {
+                tNx[d] = nlxp[d][fx[d]];
+                tndiv[d] = ndivlxp[d][fx[d]];
+                ttV *= tNx[d];
+            }
+            if ((double)ttV >= g_nvol && (double)ttV <= 1.3 * g_nvol_max) {
                 // shape fits the node volume
-                foralldir(d) {
-                    tNx[d] = nlxp[d][fx[d]];
-                    tndiv[d] = ndivlxp[d][fx[d]];
-                }
                 tbndry = block_boundary_size(tNx);
-                if(tbndry < minbndry) {
+                if (ttV < minV || (ttV == minV && tbndry < minbndry)) {
                     // boundary of current shape is smaller than minbndry
                     //  -> update minbndry and nodesiz to current shape
+                    minV = ttV;
                     minbndry = tbndry;
                     nodesiz = tNx;
                     nodes.n_divisions = tndiv;
+                    succ = true;
                 }
             }
 
@@ -147,6 +154,12 @@ void lattice_struct::setup_layout() {
                 // no more shapes left
                 break;
             }
+        }
+
+        if (!succ) {
+            hila::out0 << "Could not successfully lay out the lattice with "
+                       << hila::number_of_nodes() << " nodes\n";
+            hila::finishrun();
         }
 
         // set up struct nodes variables
