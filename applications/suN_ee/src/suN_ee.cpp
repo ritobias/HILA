@@ -375,8 +375,8 @@ void do_interp_hb_trajectory(GaugeField<group> (&U)[2], const PlaquetteField<pT>
     }
 
     ds = 0;
-    for (int n = 1; n < p.n_interp_steps; n++) {
-        ds += measure_ds_wplaq_dbcms(U, plaq_tbc_mode); // work done during interpolation step
+    for (int n = 1; n < p.n_interp_steps; ++n) {
+        ds += measure_ds_wplaq_dbcms(U, plaq_tbc_mode); // work done during n-th interpolation step
         p.alpha = alpha0 + n * dalpha;
         for (int i = 0; i < 2 * NDIM; ++i) {
             // randomly choose a parity and a direction:
@@ -385,7 +385,9 @@ void do_interp_hb_trajectory(GaugeField<group> (&U)[2], const PlaquetteField<pT>
             int tpar = 1 + (tdp % 2);
             hb_update_parity_dir(U, plaq_tbc_mode, p, Direction(tdir), Parity(tpar), false);
         }
-        U[0].reunitarize_gauge();
+        if(n % (p.n_update) == 0) {
+            U[0].reunitarize_gauge();
+        }
     }
     ds += measure_ds_wplaq_dbcms(U, plaq_tbc_mode); // work done during last interpolation step
 
@@ -470,7 +472,7 @@ void checkpoint(const GaugeField<T> &U, int trajectory, const parameters &p) {
         std::ofstream outf;
         outf.open("run_status", std::ios::out | std::ios::trunc);
         outf << "trajectory  " << trajectory + 1 << '\n';
-        outf << "alpha       " << p.alpha << "\n";
+        //outf << "alpha       " << p.alpha << "\n";
         outf << "seed        " << static_cast<uint64_t>(hila::random() * (1UL << 61)) << '\n';
         outf << "time        " << hila::gettime() << '\n';
         // write config name to status file:
@@ -491,7 +493,7 @@ bool restore_checkpoint(GaugeField<T> &U, int &trajectory, parameters &p) {
     if (status.open("run_status", false, false)) {
         hila::out0 << "RESTORING FROM CHECKPOINT:\n";
         trajectory = status.get("trajectory");
-        p.alpha = status.get("alpha");
+        //p.alpha = status.get("alpha");
         seed = status.get("seed");
         p.time_offset = status.get("time");
         // get config name with suffix from status file:
@@ -638,6 +640,8 @@ int main(int argc, char **argv) {
     p.s = par.get("replica number");
     // entangling region slab width
     p.l = par.get("slab width");
+    // interpolation parameter
+    p.alpha = par.get("alpha");
     // number of trajectories
     p.n_traj = par.get("number of trajectories");
     // number of heat-bath (HB) sweeps per trajectory
@@ -666,8 +670,6 @@ int main(int argc, char **argv) {
     p.config_file = par.get("config name");
 
     par.close(); // file is closed also when par goes out of scope
-
-    p.alpha = 0;
 
     if(p.s<=1) {
         hila::out0 << "Error: replica number s must be larger than 1. Current value is s=" << p.s << "\n";
@@ -814,7 +816,7 @@ int main(int argc, char **argv) {
 
         measure_stuff(U, plaq_tbc_mode, p);
 
-        if (trajectory >= 0) {
+        if (trajectory >= 0 && p.n_interp_steps > 0) {
             do_hbbc_measure(U, plaq_tbc_mode, p);
         }
 

@@ -8,9 +8,9 @@
 #include "tools/string_format.h"
 
 
-template <typename group, typename pT, typename atype = hila::arithmetic_type<group>>
-void get_gf_force(const GaugeField<group> (&U)[2], const PlaquetteField<pT> &plaq_tbc_mode, atype alpha,
-                  out_only VectorField<Algebra<group>> &E) {
+template <typename T, typename pT, typename atype = hila::arithmetic_type<T>>
+void get_gf_force(const GaugeField<T> (&U)[2], const PlaquetteField<pT> &plaq_tbc_mode, atype alpha,
+                  out_only VectorField<Algebra<T>> &E) {
     // wrapper for force computation routine to be used for gradient flow
 
     atype eps = 1.0; // in principle need factor 2.0 here to switch from unoriented to oriented
@@ -22,11 +22,11 @@ void get_gf_force(const GaugeField<group> (&U)[2], const PlaquetteField<pT> &pla
 
 
     //get_force_wplaq(U, plaq_tbc_mode, alpha, E, eps);
-    VectorField<Algebra<group>> K[2];
+    VectorField<Algebra<T>> K[2];
     get_force_wplaq(U, plaq_tbc_mode, K, eps);
 
     atype isqrt2 = 1.0 / sqrt(2.0);
-    Field<Algebra<group>> P;
+    Field<Algebra<T>> P;
     if(alpha == 0) {
         foralldir(d) {
             onsites(ALL) {
@@ -46,20 +46,20 @@ void get_gf_force(const GaugeField<group> (&U)[2], const PlaquetteField<pT> &pla
     }
 }
 
-template <typename group, typename pT, typename atype = hila::arithmetic_type<group>>
-atype measure_gf_s(const GaugeField<group> (&U)[2], const PlaquetteField<pT> &plaq_tbc_mode,
+template <typename T, typename pT, typename atype = hila::arithmetic_type<T>>
+atype measure_gf_s(const GaugeField<T> (&U)[2], const PlaquetteField<pT> &plaq_tbc_mode,
                    atype alpha) {
     // wrapper for gauge action computation routine
     atype res = measure_s_wplaq(U, plaq_tbc_mode, alpha);
     return res;
 }
 
-template <typename group, typename pT, typename atype = hila::arithmetic_type<group>>
-atype measure_dE_wplaq_dt(const GaugeField<group> (&U)[2], const PlaquetteField<pT> &plaq_tbc_mode,
+template <typename T, typename pT, typename atype = hila::arithmetic_type<T>>
+atype measure_dE_wplaq_dt(const GaugeField<T> (&U)[2], const PlaquetteField<pT> &plaq_tbc_mode,
                           atype alpha) {
     Reduction<double> de = 0;
     de.allreduce(false).delayed(true);
-    VectorField<Algebra<group>> K;
+    VectorField<Algebra<T>> K;
     get_gf_force(U, plaq_tbc_mode, alpha, K);
     foralldir(d) {
         onsites(ALL) {
@@ -69,8 +69,8 @@ atype measure_dE_wplaq_dt(const GaugeField<group> (&U)[2], const PlaquetteField<
     return (atype)de.value();
 }
 
-template <typename group, typename pT, typename atype = hila::arithmetic_type<group>>
-void measure_topo_charge_and_energy_clover(const GaugeField<group> (&U)[2],
+template <typename T, typename pT, typename atype = hila::arithmetic_type<T>>
+void measure_topo_charge_and_energy_clover(const GaugeField<T> (&U)[2],
                                            const PlaquetteField<pT> &plaq_tbc_mode, atype alpha,
                                            out_only atype &qtopo_out, out_only atype &energy_out) {
     // measure topological charge and field strength energy of the gauge field, using the
@@ -82,13 +82,13 @@ void measure_topo_charge_and_energy_clover(const GaugeField<group> (&U)[2],
     energy.allreduce(false).delayed(true);
 
 #if NDIM == 4
-    Field<group> F[6];
+    Field<T> F[6];
     // F[0]: F[0][1], F[1]: F[0][2], F[2]: F[0][3],
     // F[3]: F[1][2], F[4]: F[1][3], F[5]: F[2][3]
 
-    Field<group> tF0;
+    Field<T> tF0;
 
-    Field<group> tF1[2];
+    Field<T> tF1[2];
     tF1[1].set_nn_topo(1);
 
     int k = 0;
@@ -97,13 +97,13 @@ void measure_topo_charge_and_energy_clover(const GaugeField<group> (&U)[2],
             // d1-d2-plaquette that starts and ends at X; corresponds to F[d1][d2]
             // at center location X+d1/2+d2/2 of plaquette:
             int ip = plaq_tbc_mode[d1][d2][X];
-            group tF;
+            T tF;
             if (ip == 1) {
                 tF = U[1][d1][X] * U[1][d2][X + d1] * (U[1][d2][X] * U[1][d1][X + d2]).dagger();
                 // project to Lie-algebra (anti-hermitian trace-free)
                 tF -= tF.dagger();
                 tF *= 0.5;
-                tF -= trace(tF) / group::size();
+                tF -= trace(tF) / T::size();
                 tF0[X] = tF;
                 // parallel transport to X+d2
                 tF1[1][X] = U[1][d2][X].dagger() * tF * U[1][d2][X];
@@ -112,7 +112,7 @@ void measure_topo_charge_and_energy_clover(const GaugeField<group> (&U)[2],
                 // project to Lie-algebra (anti-hermitian trace-free)
                 tF -= tF.dagger();
                 tF *= 0.5;
-                tF -= trace(tF) / group::size();
+                tF -= trace(tF) / T::size();
                 tF0[X] = alpha * tF;
                 // prepare parallel transport to X+d2
                 tF1[1][X] = U[1][d2][X].dagger() * tF * U[1][d2][X];
@@ -121,7 +121,7 @@ void measure_topo_charge_and_energy_clover(const GaugeField<group> (&U)[2],
                 // project to Lie-algebra (anti-hermitian trace-free)
                 tF -= tF.dagger();
                 tF *= 0.5;
-                tF -= trace(tF) / group::size();
+                tF -= trace(tF) / T::size();
                 tF0[X] += (1.0 - alpha) * tF;
                 // prepare parallel transport to X+d2
                 tF1[0][X] = U[0][d2][X].dagger() * tF * U[0][d2][X];
@@ -131,7 +131,7 @@ void measure_topo_charge_and_energy_clover(const GaugeField<group> (&U)[2],
                 // project to Lie-algebra (anti-hermitian trace-free)
                 tF -= tF.dagger();
                 tF *= 0.5;
-                tF -= trace(tF) / group::size();
+                tF -= trace(tF) / T::size();
                 tF0[X] = tF;
                 // prepare parallel transport to X+d2
                 tF1[0][X] = U[0][d2][X].dagger() * tF * U[0][d2][X];
@@ -177,8 +177,8 @@ void measure_topo_charge_and_energy_clover(const GaugeField<group> (&U)[2],
 }
 
 
-template <typename group, typename pT, typename atype = hila::arithmetic_type<group>>
-void measure_gradient_flow_stuff(const GaugeField<group> (&V)[2],
+template <typename T, typename pT, typename atype = hila::arithmetic_type<T>>
+void measure_gradient_flow_stuff(const GaugeField<T> (&V)[2],
                                  const PlaquetteField<pT> &plaq_tbc_mode, atype alpha, atype flow_l,
                                  atype t_step, int s) {
     // perform measurements on flowed gauge configuration V at flow scale flow_l
@@ -198,7 +198,7 @@ void measure_gradient_flow_stuff(const GaugeField<group> (&V)[2],
                  (lattice.volume() * NDIM * (NDIM - 1) / 2); // average wilson plaquette action
     atype dplaqs = measure_ds_wplaq_dbcms(V, plaq_tbc_mode) / (s * (NDIM - 1));
 
-    atype eplaq = plaq * NDIM * (NDIM - 1) * group::size(); // naive energy density (plaq. action)
+    atype eplaq = plaq * NDIM * (NDIM - 1) * T::size(); // naive energy density (plaq. action)
 
     // average energy density and toplogical charge from
     // clover definition of field strength tensor :
@@ -216,8 +216,8 @@ void measure_gradient_flow_stuff(const GaugeField<group> (&V)[2],
         flow_l, plaq, dplaqs, eplaq, 0.25 * flow_l * deplaqdt, ecl, qtopocl, t_step, max_plaq);
 }
 
-template <typename group, typename pT, typename atype = hila::arithmetic_type<group>>
-atype do_gradient_flow_adapt(GaugeField<group> (&V)[2], const PlaquetteField<pT> &plaq_tbc_mode,
+template <typename T, typename pT, typename atype = hila::arithmetic_type<T>>
+atype do_gradient_flow_adapt(GaugeField<T> (&V)[2], const PlaquetteField<pT> &plaq_tbc_mode,
                              atype alpha, atype l_start, atype l_end, atype atol = 1.0e-6,
                              atype rtol = 1.0e-4, atype tstep = 0.0) {
     // wilson flow integration from flow scale l_start to l_end using 3rd order
@@ -246,8 +246,8 @@ atype do_gradient_flow_adapt(GaugeField<group> (&V)[2], const PlaquetteField<pT>
     // "<<minmaxreldiff<<"\n";
 
     // temporary variables :
-    VectorField<Algebra<group>> k1, k2, tk;
-    GaugeField<group> V2, V0;
+    VectorField<Algebra<T>> k1, k2, tk;
+    GaugeField<T> V2, V0;
     Field<atype> reldiff;
 
     // RK3 coefficients from arXiv:1006.4518 :

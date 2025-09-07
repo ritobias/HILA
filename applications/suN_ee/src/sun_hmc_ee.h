@@ -17,30 +17,30 @@ struct hmc_parameters {
     int trajlen;        // number of HMC time steps per trajectory
 };
 
-template <typename group, typename pT, typename atype = hila::arithmetic_type<group>>
-double measure_s(const GaugeField<group> (&U)[2], const PlaquetteField<pT> &plaq_tbc_mode,
+template <typename T, typename pT, typename atype = hila::arithmetic_type<T>>
+double measure_s(const GaugeField<T> (&U)[2], const PlaquetteField<pT> &plaq_tbc_mode,
                  atype alpha) {
     return measure_s_wplaq(U, plaq_tbc_mode, alpha);
 }
 
-template <typename group, typename pT, typename atype = hila::arithmetic_type<group>>
-void update_E(const GaugeField<group> (&U)[2], const PlaquetteField<pT> &plaq_tbc_mode, atype alpha,
-              VectorField<Algebra<group>> &E, atype delta) {
+template <typename T, typename pT, typename atype = hila::arithmetic_type<T>>
+void update_E(const GaugeField<T> (&U)[2], const PlaquetteField<pT> &plaq_tbc_mode, atype alpha,
+              VectorField<Algebra<T>> &E, atype delta) {
     // compute the force for the chosen action and use it to evolve E
-    atype eps = delta / group::size();
+    atype eps = delta / T::size();
     get_force_wplaq_add(U, plaq_tbc_mode, alpha, E, eps);
 }
 
-template <typename group, typename pT, typename atype = hila::arithmetic_type<group>>
-void update_E2(const GaugeField<group> (&U)[2], const PlaquetteField<pT> &plaq_tbc_mode, int intp_dir,
-              VectorField<Algebra<group>> &E, atype delta) {
+template <typename T, typename pT, typename atype = hila::arithmetic_type<T>>
+void update_E2(const GaugeField<T> (&U)[2], const PlaquetteField<pT> &plaq_tbc_mode, int intp_dir,
+              VectorField<Algebra<T>> &E, atype delta) {
     // compute the force for the chosen action and use it to evolve E
-    atype eps = delta / group::size();
-    VectorField<Algebra<group>> K[2];
+    atype eps = delta / T::size();
+    VectorField<Algebra<T>> K[2];
     get_force_wplaq(U, plaq_tbc_mode, K, eps);
 
     atype isqrt2 = 1.0 / sqrt(2.0);
-    Field<Algebra<group>> P;
+    Field<Algebra<T>> P;
     if (intp_dir>0) {
         foralldir(d) {
             onsites(ALL) {
@@ -62,16 +62,16 @@ void update_E2(const GaugeField<group> (&U)[2], const PlaquetteField<pT> &plaq_t
     }
 }
 
-template <typename group, typename atype = hila::arithmetic_type<group>>
-void update_U(GaugeField<group> &U, const VectorField<Algebra<group>> &E, atype delta) {
+template <typename T, typename atype = hila::arithmetic_type<T>>
+void update_U(GaugeField<T> &U, const VectorField<Algebra<T>> &E, atype delta) {
     // evolve U with momentum E over time step delta
     foralldir(d) {
         onsites(ALL) U[d][X] = chexp(E[d][X].expand_scaled(delta)) * U[d][X];
     }
 }
 
-template <typename group>
-double measure_e2(const VectorField<Algebra<group>> &E) {
+template <typename T>
+double measure_e2(const VectorField<Algebra<T>> &E) {
     // compute gauge kinetic energy from momentum field E
     Reduction<double> e2 = 0;
     e2.allreduce(false).delayed(true);
@@ -81,9 +81,9 @@ double measure_e2(const VectorField<Algebra<group>> &E) {
     return e2.value() / 2;
 }
 
-template <typename group, typename pT, typename atype = hila::arithmetic_type<group>>
-double measure_action(const GaugeField<group> (&U)[2], const PlaquetteField<pT> &plaq_tbc_mode,
-                      atype alpha, const VectorField<Algebra<group>> &E, const hmc_parameters &p,
+template <typename T, typename pT, typename atype = hila::arithmetic_type<T>>
+double measure_action(const GaugeField<T> (&U)[2], const PlaquetteField<pT> &plaq_tbc_mode,
+                      atype alpha, const VectorField<Algebra<T>> &E, const hmc_parameters &p,
                       out_only double &plaq, out_only double &e2) {
     // measure the total action, consisting of plaquette and momentum term
     plaq = p.beta * measure_s(U, plaq_tbc_mode, alpha);
@@ -91,18 +91,18 @@ double measure_action(const GaugeField<group> (&U)[2], const PlaquetteField<pT> 
     return plaq + e2;
 }
 
-template <typename group, typename pT, typename atype = hila::arithmetic_type<group>>
-double measure_action(const GaugeField<group> (&U)[2], const PlaquetteField<pT> &plaq_tbc_mode,
-                      atype alpha, const VectorField<Algebra<group>> &E, const hmc_parameters &p) {
+template <typename T, typename pT, typename atype = hila::arithmetic_type<T>>
+double measure_action(const GaugeField<T> (&U)[2], const PlaquetteField<pT> &plaq_tbc_mode,
+                      atype alpha, const VectorField<Algebra<T>> &E, const hmc_parameters &p) {
     // measure the total action, consisting of plaquette and momentum term
     double plaq, e2;
     return measure_action(U, plaq_tbc_mode, alpha, E, p, plaq, e2);
 }
 
 
-template <typename group, typename pT, typename atype = hila::arithmetic_type<group>>
-void do_interp_hmc_trajectory(GaugeField<group> (&U)[2], const PlaquetteField<pT> &plaq_tbc_mode,
-                       VectorField<Algebra<group>> &E, const hmc_parameters &p, int interp_dir, out_only atype &ds) {
+template <typename T, typename pT, typename atype = hila::arithmetic_type<T>>
+void do_interp_hmc_trajectory(GaugeField<T> (&U)[2], const PlaquetteField<pT> &plaq_tbc_mode,
+                       VectorField<Algebra<T>> &E, const hmc_parameters &p, int interp_dir, out_only atype &ds) {
     // leap frog integration for interpolating action
     atype dalpha = 1.0 / p.trajlen; // step size of interpolating parameter
     atype alpha0 = 0;
@@ -132,9 +132,9 @@ void do_interp_hmc_trajectory(GaugeField<group> (&U)[2], const PlaquetteField<pT
     U[0].reunitarize_gauge();
 }
 
-template <typename group, typename pT, typename atype = hila::arithmetic_type<group>>
-void do_interp_hmc_trajectory2(GaugeField<group> (&U)[2], const PlaquetteField<pT> &plaq_tbc_mode,
-                              VectorField<Algebra<group>> &E, const hmc_parameters &p,
+template <typename T, typename pT, typename atype = hila::arithmetic_type<T>>
+void do_interp_hmc_trajectory2(GaugeField<T> (&U)[2], const PlaquetteField<pT> &plaq_tbc_mode,
+                              VectorField<Algebra<T>> &E, const hmc_parameters &p,
                               int interp_dir, out_only atype &ds) {
     // leap frog integration for interpolating action
     atype dalpha = 1.0 / p.trajlen; // step size of interpolating parameter
@@ -165,9 +165,9 @@ void do_interp_hmc_trajectory2(GaugeField<group> (&U)[2], const PlaquetteField<p
     U[0].reunitarize_gauge();
 }
 
-template <typename group, typename pT, typename atype = hila::arithmetic_type<group>>
-void do_hmc_trajectory(GaugeField<group> (&U)[2], const PlaquetteField<pT> &plaq_tbc_mode,
-                       atype alpha, VectorField<Algebra<group>> &E, const hmc_parameters &p) {
+template <typename T, typename pT, typename atype = hila::arithmetic_type<T>>
+void do_hmc_trajectory(GaugeField<T> (&U)[2], const PlaquetteField<pT> &plaq_tbc_mode,
+                       atype alpha, VectorField<Algebra<T>> &E, const hmc_parameters &p) {
     // leap frog integration for interpolating action at constant alpha
 
     // start trajectory: advance U by half a time step
