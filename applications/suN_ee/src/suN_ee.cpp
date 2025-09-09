@@ -378,16 +378,25 @@ void do_interp_hb_trajectory(GaugeField<group> (&U)[2], const PlaquetteField<pT>
     for (int n = 1; n < p.n_interp_steps; ++n) {
         ds += measure_ds_wplaq_dbcms(U, plaq_tbc_mode); // work done during n-th interpolation step
         p.alpha = alpha0 + n * dalpha;
+#if 0
         for (int i = 0; i < 2 * NDIM; ++i) {
             // randomly choose a parity and a direction:
             int tdp = hila::broadcast((int)(hila::random() * 2 * NDIM));
             int tdir = tdp / 2;
             int tpar = 1 + (tdp % 2);
+
             hb_update_parity_dir(U, plaq_tbc_mode, p, Direction(tdir), Parity(tpar), false);
         }
-        if(n % (p.n_update) == 0) {
+        if(n % p.n_update == 0) {
             U[0].reunitarize_gauge();
         }
+#else
+        hb_update(U, plaq_tbc_mode, p);
+        if (n % (p.n_update + p.n_overrelax) == 0) {
+            U[0].reunitarize_gauge();
+        }
+#endif
+
     }
     ds += measure_ds_wplaq_dbcms(U, plaq_tbc_mode); // work done during last interpolation step
 
@@ -762,16 +771,17 @@ int main(int argc, char **argv) {
             }
         }
     }
-    /*
-    if(0) {
+
+#if 0
+    if(1) {
         foralldir(d1) {
-            foralldir(d2) if(d1 != d2) {
+            foralldir(d2) if(d1 < d2) {
                 onsites(ALL) {
                     int ip = plaq_tbc_mode[d1][d2][X];
                     if (ip == 2) {
                         hila::out << "X=(" << X.coordinates() << "), d1=" << d1 << ", d2=" << d2
-                                  << ", X+" << d2 << ": " << plaq_tbc_mode[d1][d2][X + d2] << ", X-"
-                                  << d2 << ": " << plaq_tbc_mode[d1][d2][X - d2] << "\n";
+                                  << ", X+" << d1 << ": " << plaq_tbc_mode[d1][d2][X + d1] << ", X-"
+                                  << d1 << ": " << plaq_tbc_mode[d1][d2][X - d1] << "\n";
                     } else if(ip == -1) {
                         hila::out << "error: " << "X=(" << X.coordinates() << "), d1=" << d1
                                   << ", d2=" << d2 << " plaq_tbc_mode = 0\n";
@@ -780,7 +790,7 @@ int main(int argc, char **argv) {
             }
         }
     }
-    */
+#endif  
 
 
     // use negative trajectory for thermal

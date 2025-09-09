@@ -4,12 +4,12 @@ lattice size           18,11,11,24
 beta                   10.79191
 replica number         2
 slab width             2.5
-alpha                  0.1
+alpha                  0.0
 number of trajectories 220
 heatbath updates       10
 overrelax updates      10
 thermalization trajs   100
-interpolation steps    0
+interpolation steps    200
 gflow freq             0
 gflow max lambda       0
 gflow lambda step      0.1
