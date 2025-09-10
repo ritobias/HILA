@@ -849,15 +849,7 @@ void lattice_struct::initialize_wait_arrays() {
     }
 }
 
-#ifndef SPECIAL_BOUNDARY_CONDITIONS
-#if defined(CUDA) || defined(HIP)
-const unsigned *lattice_struct::get_neighbour_array(Direction d, hila::bc bc, int nn_topo = 0) {
-
-    return neighb[d] + nn_topo * mynode.volume();
-}
-#endif
-
-#else
+#ifdef SPECIAL_BOUNDARY_CONDITIONS
 
 /////////////////////////////////////////////////////////////////////
 /// set up special boundary
