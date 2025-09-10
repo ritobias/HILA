@@ -105,7 +105,7 @@ void lattice_struct::setup_layout() {
 
         nodesiz = tNx;
         nodes.n_divisions = tndiv;
-        size_t minbndry = block_boundary_size(tNx); //initial boundary size
+        size_t minbndry = block_boundary_size(tNx) + 1; //initial boundary size
         size_t minV = 1;
         foralldir(d) minV *= tNx[d];
         size_t ttV, tbndry;
