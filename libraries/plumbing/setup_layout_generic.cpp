@@ -105,9 +105,9 @@ void lattice_struct::setup_layout() {
 
         nodesiz = tNx;
         nodes.n_divisions = tndiv;
-        size_t minbndry = block_boundary_size(tNx) + 1; //initial boundary size
+        size_t minbndry = block_boundary_size(tNx) + 1; // initial boundary size
         size_t minV = 1;
-        foralldir(d) minV *= tNx[d];
+        foralldir(d) minV *= tNx[d]; // initial volume
         size_t ttV, tbndry;
         bool succ = false;
         // now run through all shapes that can be formed with the side lengths listed in nlxp:

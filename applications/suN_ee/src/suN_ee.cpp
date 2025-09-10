@@ -833,7 +833,7 @@ int main(int argc, char **argv) {
         do_hb_trajectory(U, plaq_tbc_mode, p);
 
         // put sync here in order to get approx gpu timing
-        hila::synchronize_threads();
+        //hila::synchronize_threads();
         update_timer.stop();
 
         measure_timer.start();
