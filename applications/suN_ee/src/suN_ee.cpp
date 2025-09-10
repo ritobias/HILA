@@ -26,7 +26,7 @@ struct parameters {
     ftype alpha;        // interpolation parameter
     int n_traj;         // number of trajectories to generate
     int n_therm;        // number of thermalization trajectories (counts only accepted traj.)
-    int n_update;       // number of heat-bath sweeps per "trajectory"
+    int n_heatbath;       // number of heat-bath sweeps per "trajectory"
     int n_overrelax;    // number of overrelaxation sweeps per "trajectory"
     int n_interp_steps; // number of interpolation steps to change alpha from 0 to 1
     int gflow_freq;     // number of trajectories between gflow measurements
@@ -194,15 +194,29 @@ void hb_update_parity_dir(GaugeField<T> (&U)[2], const PlaquetteField<pT> &plaq_
  */
 template <typename T, typename pT>
 void hb_update(GaugeField<T> (&U)[2], const PlaquetteField<pT> &plaq_tbc_mode, const parameters &p) {
+    std::array<int, 2 * NDIM> rnarr;
     for (int i = 0; i < 2 * NDIM; ++i) {
         // randomly choose a parity and a direction:
-        int tdp = hila::broadcast((int)(hila::random() * 2 * NDIM));
+        rnarr[i] = (int)(hila::random() * 2 * NDIM);
+
+        // randomly choose whether to do overrelaxation or heatbath update (with probabilities
+        // according to specified p.n_heatbath and p.n_overrelax):
+        if (hila::random() >= p.n_heatbath / (p.n_heatbath + p.n_overrelax)) {
+            rnarr[i] += 2 * NDIM;
+        }
+    }
+    hila::broadcast(rnarr);
+
+    for (int i = 0; i < 2 * NDIM; ++i) {
+        bool relax = false;
+        int tdp = rnarr[i];
+        if(tdp >= 2 * NDIM) {
+            tdp -= 2 * NDIM;
+            relax = true;
+        }
         int tdir = tdp / 2;
         int tpar = 1 + (tdp % 2);
-        // randomly choose whether to do overrelaxation or heatbath update (with probabilities
-        // according to specified p.n_update and p.n_overrelax):
-        bool relax =
-            hila::broadcast((int)(hila::random() * (p.n_update + p.n_overrelax)) >= p.n_update);
+
         // perform the selected updates:
         hb_update_parity_dir(U, plaq_tbc_mode, p, Direction(tdir), Parity(tpar), relax);
     }
@@ -211,7 +225,7 @@ void hb_update(GaugeField<T> (&U)[2], const PlaquetteField<pT> &plaq_tbc_mode, c
 /**
  * @brief Evolve gauge field
  * @details Evolution happens by means of heat bath and overrelaxation. We do on average
- * p.n_update heatbath updates and p.n_overrelax overrelaxation updates on each link per sweep.
+ * p.n_heatbath heatbath updates and p.n_overrelax overrelaxation updates on each link per sweep.
  *
  * @tparam T gaug field type
  * @tparam pT type of plaq_tbc_mode
@@ -222,7 +236,7 @@ void hb_update(GaugeField<T> (&U)[2], const PlaquetteField<pT> &plaq_tbc_mode, c
 template <typename T, typename pT>
 void do_hb_trajectory(GaugeField<T> (&U)[2], const PlaquetteField<pT> &plaq_tbc_mode,
                    const parameters &p) {
-    for (int n = 0; n < p.n_update + p.n_overrelax; n++) {
+    for (int n = 0; n < p.n_heatbath + p.n_overrelax; n++) {
         hb_update(U, plaq_tbc_mode, p);
     }
     U[0].reunitarize_gauge();
@@ -387,12 +401,14 @@ void do_interp_hb_trajectory(GaugeField<group> (&U)[2], const PlaquetteField<pT>
 
             hb_update_parity_dir(U, plaq_tbc_mode, p, Direction(tdir), Parity(tpar), false);
         }
-        if(n % p.n_update == 0) {
+
+        if(n % p.n_heatbath == 0) {
             U[0].reunitarize_gauge();
         }
 #else
         hb_update(U, plaq_tbc_mode, p);
-        if (n % (p.n_update + p.n_overrelax) == 0) {
+
+        if (n % (p.n_heatbath + p.n_overrelax) == 0) {
             U[0].reunitarize_gauge();
         }
 #endif
@@ -654,7 +670,7 @@ int main(int argc, char **argv) {
     // number of trajectories
     p.n_traj = par.get("number of trajectories");
     // number of heat-bath (HB) sweeps per trajectory
-    p.n_update = par.get("heatbath updates");
+    p.n_heatbath = par.get("heatbath updates");
     // number of overrelaxation sweeps petween HB sweeps
     p.n_overrelax = par.get("overrelax updates");
     // number of thermalization trajectories
