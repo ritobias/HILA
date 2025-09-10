@@ -325,11 +325,7 @@ class lattice_struct {
     const unsigned *get_neighbour_array(Direction d, hila::bc bc, int nn_topo = 0);
 #else
     const unsigned *get_neighbour_array(Direction d, hila::bc bc, int nn_topo = 0) {
-#if !defined(CUDA) && !defined(HIP)
         return neighb[d] + nn_topo * mynode.volume();
-#else
-        return backend_lattice->d_neighb[d] + nn_topo * mynode.volume();
-#endif
     }
 #endif
 
