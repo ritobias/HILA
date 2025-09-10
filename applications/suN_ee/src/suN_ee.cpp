@@ -201,7 +201,7 @@ void hb_update(GaugeField<T> (&U)[2], const PlaquetteField<pT> &plaq_tbc_mode, c
 
         // randomly choose whether to do overrelaxation or heatbath update (with probabilities
         // according to specified p.n_heatbath and p.n_overrelax):
-        if (hila::random() >= p.n_heatbath / (p.n_heatbath + p.n_overrelax)) {
+        if (hila::random() >= (double)p.n_heatbath / (p.n_heatbath + p.n_overrelax)) {
             rnarr[i] += 2 * NDIM;
         }
     }
