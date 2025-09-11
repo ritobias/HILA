@@ -407,8 +407,8 @@ class Field {
      */
     Field(Field &&rhs) {
         fs = rhs.fs;
-        has_refs = rhs.has_refs;
         is_ref_of = rhs.is_ref_of;
+        has_refs = rhs.has_refs;
         rhs.fs = nullptr;
         rhs.is_ref_of = nullptr;
         for (int i = 0; i < rhs.has_refs.size(); ++i) {
@@ -731,7 +731,7 @@ class Field {
 
     /**
      * @internal
-     * @brief Construct Field that references the field data of other field but using different
+     * @brief make this field to reference the field data of other field, using a different
      * nn-topology
      * @param other
      * @param nn_topo
@@ -755,16 +755,24 @@ class Field {
         allocate_with_ref(is_ref_of->fs, nn_topo);
     }
 
+    /**
+     * @internal
+     * @brief change the nearest neighbor topology of this field
+     * @param nn_topo integer that defines which nn-topology form lattice.nn_map list should be
+     * used
+     */
     void set_nn_topo(int nn_topo) {
         assert(0 <= nn_topo && nn_topo < lattice.nn_map.size() &&
                "Invalid nn_topo value used in Field::set_nn_topo(nn_topo)");
         check_alloc();
-        //foralldir(d) wait_gather(d, ALL);
         if (nn_topo == fs->nn_topo) {
             //nothing to do if nn_topo is same as current value
             return;
         }
-        if(is_ref_of == nullptr) {
+        for (Direction d = (Direction)0; d < NDIRS; ++d) {
+            drop_comms(d, ALL);
+        }
+        if (is_ref_of == nullptr) {
             assert(has_refs[nn_topo] == nullptr && "Ref. Field with same nn_topo already exists");
             has_refs[fs->nn_topo] = nullptr;
             fs->nn_topo = nn_topo;
