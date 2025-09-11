@@ -167,7 +167,7 @@ class lattice_struct {
     struct comm_node_struct {
         unsigned rank; // rank of communicated with node
         size_t sites, evensites, oddsites;
-        size_t buffer; // offset from the start of field array
+        size_t buffer, buffer_s; // offset from the start of field array
         unsigned *sitelist;
 
         // Get a vector containing the sites of parity par and number of elements
@@ -210,6 +210,15 @@ class lattice_struct {
                 return buffer + evensites;
             } else {
                 return buffer;
+            }
+        }
+
+        // The offset from the start of the separate buffer array
+        unsigned offset_s(Parity par) const {
+            if (par == ODD) {
+                return buffer_s + evensites;
+            } else {
+                return buffer_s;
             }
         }
     };

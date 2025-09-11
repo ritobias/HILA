@@ -123,7 +123,7 @@ T *Field<T>::field_struct::get_receive_buffer(Direction d, Parity par,
     if (receive_buffer[d] == nullptr) {
         receive_buffer[d] = payload.allocate_mpi_buffer(lattice.comm_buffer_size[d]);
     }
-    return receive_buffer[d] + from_node.offset(par);
+    return receive_buffer[d] + from_node.offset_s(par);
 
 #elif defined(VECTORIZED)
 

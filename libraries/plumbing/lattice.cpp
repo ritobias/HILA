@@ -505,7 +505,9 @@ void lattice_struct::create_std_gathers() {
 
         // and set buffer indices
         from_node.buffer = c_offset;
+        from_node.buffer_s = 0;
         to_node.buffer = 0;
+        to_node.buffer_s = 0;
 
         // determine required send_buffer size:
         if (from_node.sites > comm_buffer_size[d]) {
@@ -713,12 +715,14 @@ void lattice_struct::create_gen_std_gathers() {
                 to_node.oddsites = from_node.evensites;
 
                 //set buffer indices
-#ifdef VANILLA
+
                 from_node.buffer = c_offset; // location in fieldbuffer
-#else
-                from_node.buffer = buff_offset;
-#endif
+
+                from_node.buffer_s = buff_offset;
+
                 to_node.buffer = buff_offset;
+
+                to_node.buffer_s = buff_offset;
 
                 buff_offset += to_node.sites;
 
