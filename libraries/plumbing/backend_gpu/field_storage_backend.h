@@ -257,32 +257,6 @@ __global__ void gather_comm_elements_negated_kernel(field_storage<T> field, T *b
     }
 }
 
-// Index list is constant? Map each cpu pointer to a device pointer and copy just once
-struct cuda_comm_node_struct {
-    const unsigned *cpu_index;
-    unsigned *gpu_index;
-    int n;
-};
-
-inline unsigned *get_site_index(const lattice_struct::comm_node_struct &to_node, Parity par,
-                                int &n) {
-    static std::vector<struct cuda_comm_node_struct> comm_nodes;
-
-    const unsigned *cpu_index = to_node.get_sitelist(par, n);
-    for (struct cuda_comm_node_struct comm_node : comm_nodes) {
-        if (cpu_index == comm_node.cpu_index && n == comm_node.n) {
-            return comm_node.gpu_index;
-        }
-    }
-    struct cuda_comm_node_struct comm_node;
-    comm_node.cpu_index = cpu_index;
-    comm_node.n = n;
-    gpuMalloc(&(comm_node.gpu_index), n * sizeof(unsigned));
-    gpuMemcpy(comm_node.gpu_index, cpu_index, n * sizeof(unsigned), gpuMemcpyHostToDevice);
-    comm_nodes.push_back(comm_node);
-    return comm_node.gpu_index;
-}
-
 // MPI buffer on the device. Use the gather_elements and gather_elements_negated
 // kernels to fill the buffer.
 template <typename T>
@@ -291,7 +265,7 @@ void field_storage<T>::gather_comm_elements(T *buffer,
                                             Parity par, const lattice_struct &lattice,
                                             bool antiperiodic) const {
     int n;
-    unsigned *d_site_index = get_site_index(to_node, par, n);
+    unsigned *d_site_index = to_node.get_sitelist(par, n);
     T *d_buffer;
 
 #ifdef GPU_AWARE_MPI

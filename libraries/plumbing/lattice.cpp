@@ -575,6 +575,11 @@ void lattice_struct::create_std_gathers() {
                     }
                 }
             }
+#if defined(CUDA) || defined(HIP)
+            auto p = copy_array_to_gpu(to_node.sitelist, to_node.sites);
+            free(to_node.sitelist);
+            to_node.sitelist = p;
+#endif
         }
 
         c_offset += from_node.sites;
@@ -792,6 +797,11 @@ void lattice_struct::create_gen_std_gathers() {
                             to_node.sitelist[to_node.evensites + i] = to_node_os[i].c[1];
                         }
                     }
+#if defined(CUDA) || defined(HIP)
+                    auto p = copy_array_to_gpu(to_node.sitelist, to_node.sites);
+                    free(to_node.sitelist);
+                    to_node.sitelist = p;
+#endif
                     c_offset += from_node.sites;
                 }
 
