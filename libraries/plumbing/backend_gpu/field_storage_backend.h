@@ -224,7 +224,7 @@ void field_storage<T>::gather_elements_negated(T *RESTRICT buffer,
 #endif
 
 template <typename T>
-__global__ void gather_comm_elements_kernel(field_storage<T> field, T *buffer, unsigned *site_index,
+__global__ void gather_comm_elements_kernel(field_storage<T> field, T *buffer, const unsigned *site_index,
                                             const int n, const unsigned field_alloc_size) {
     unsigned Index = threadIdx.x + blockIdx.x * blockDim.x;
     if (Index < n) {
@@ -242,7 +242,7 @@ __global__ void gather_comm_elements_kernel(field_storage<T> field, T *buffer, u
 // gather -elements only if unary - exists
 template <typename T, std::enable_if_t<hila::has_unary_minus<T>::value, int> = 0>
 __global__ void gather_comm_elements_negated_kernel(field_storage<T> field, T *buffer,
-                                                    unsigned *site_index, const int n,
+                                                    const unsigned *site_index, const int n,
                                                     const unsigned field_alloc_size) {
     unsigned Index = threadIdx.x + blockIdx.x * blockDim.x;
     if (Index < n) {
