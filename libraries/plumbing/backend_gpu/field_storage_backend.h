@@ -265,7 +265,7 @@ void field_storage<T>::gather_comm_elements(T *buffer,
                                             Parity par, const lattice_struct &lattice,
                                             bool antiperiodic) const {
     int n;
-    unsigned *d_site_index = to_node.get_sitelist(par, n);
+    const unsigned *d_site_index = to_node.get_sitelist(par, n);
     T *d_buffer;
 
 #ifdef GPU_AWARE_MPI
