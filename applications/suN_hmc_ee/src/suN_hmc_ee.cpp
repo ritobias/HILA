@@ -1,5 +1,6 @@
 #include "hila.h"
 #include "wilson_plaquette_action_ee.h"
+#include "sun_hmc_ee.h"
 #include "gauge/sun_heatbath.h"
 #include "gauge/sun_overrelax.h"
 #include "gradient_flow_ee.h"
@@ -244,6 +245,214 @@ void do_hb_trajectory(GaugeField<T> (&U)[2], const PlaquetteField<pT> &plaq_tbc_
 
 
 // heat-bath functions
+///////////////////////////////////////////////////////////////////////////////////
+// hmc functions
+#if 0
+template <typename T, typename pT, typename atype = hila::arithmetic_type<T>>
+void do_hmc_bc_update(GaugeField<T> (&U)[2], const PlaquetteField<pT> &plaq_tbc_mode,
+                      VectorField<Algebra<T>> &E, parameters &p, const hmc_parameters &p_hmc) {
+
+    static hila::timer hmc_timer("HMC (update)");
+    hmc_timer.start();
+
+    auto alpha = p.alpha;
+
+    atype ds = 0;
+    GaugeField<T> U_old = U[0];
+
+    int ipdir = 0;
+
+    foralldir(d) onsites(ALL) E[d][X].gaussian_random();
+
+    double act_old, act_new, g_act_old, g_act_new, e_act_old, e_act_new;
+
+    act_old = measure_action(U, plaq_tbc_mode, alpha, E, p_hmc, g_act_old, e_act_old);
+
+    ftype ttime = hila::gettime();
+
+    if (alpha == 0) {
+        ipdir = 1;
+        do_interp_hmc_trajectory(U, plaq_tbc_mode, E, p_hmc, ipdir, ds);
+        alpha = 1.0;
+    } else {
+        ipdir = -1;
+        do_interp_hmc_trajectory(U, plaq_tbc_mode, E, p_hmc, ipdir, ds);
+        alpha = 0;
+    }
+
+    act_new = measure_action(U, plaq_tbc_mode, alpha, E, p_hmc, g_act_new, e_act_new);
+
+
+    bool reject = hila::broadcast(exp(-(act_new - act_old)) < hila::random());
+
+    hila::out0 << string_format(
+        "HMCUD  DIR: % 1d  S_TOT_START: % 0.6e  dS_TOT: % 0.6e  dS_GAUGE: % 0.6e  dS_MOM: % 0.6e  "
+        "dS_EXT: % 0.6e  ACCEPT: % 1d  TIME: %0.5f\n",
+        ipdir, act_old, act_new - act_old, g_act_new - g_act_old, e_act_new - e_act_old, ds,
+        (int)!reject, hila::gettime() - ttime);
+
+
+    if (reject) {
+        U[0] = U_old;
+    } else {
+        p.alpha = alpha;
+    }
+
+    hmc_timer.stop();
+}
+#endif
+
+template <typename T, typename pT, typename atype = hila::arithmetic_type<T>>
+void do_hmc_measure_w(GaugeField<T> (&U)[2], const PlaquetteField<pT> &plaq_tbc_mode, parameters &p,
+                    const hmc_parameters &p_hmc) {
+
+    static hila::timer hmcw_ms_timer("HMCW (measure)");
+    hmcw_ms_timer.start();
+
+    auto alpha = p.alpha;
+
+    atype ds = 0;
+    GaugeField<T> U_old = U[0];
+
+    VectorField<Algebra<T>> E;
+
+    static bool first = true;
+    if (first) {
+        // print legend for measurement output
+        hila::out0
+            << "LHMCW: DIR      S_TOT_S        dS_TOT       dS_PLAQ        dE_KIN        dS_EXT"
+               "     SUCC       TIME\n";
+        first = false;
+    }
+
+    int ipdir = 0;
+
+    foralldir(d) onsites(ALL) E[d][X].gaussian_random();
+
+    double g_act_old, g_act_new, e_act_old, e_act_new;
+
+    auto act_old = measure_action(U, plaq_tbc_mode, alpha, E, p_hmc, g_act_old, e_act_old);
+
+    ftype ttime = hila::gettime();
+
+    if (alpha == 0) {
+        ipdir = 1;
+        do_interp_hmc_trajectory2(U, plaq_tbc_mode, E, p_hmc, ipdir, ds);
+        alpha = 1;
+    } else if(alpha == 1) {
+        ipdir = -1;
+        do_interp_hmc_trajectory2(U, plaq_tbc_mode, E, p_hmc, ipdir, ds);
+        alpha = 0;
+    }
+
+    auto act_new = measure_action(U, plaq_tbc_mode, alpha, E, p_hmc, g_act_new, e_act_new);
+
+
+    // bool reject = hila::broadcast(exp(-(act_new - act_old)) < hila::random());
+    bool reject = true;
+
+
+    hila::out0 << string_format(
+        "HMCW   % 1d % 0.6e % 0.6e % 0.6e % 0.6e % 0.6e       % 1d % 10.5f\n", ipdir, act_old,
+        act_new - act_old, g_act_new - g_act_old, e_act_new - e_act_old, ds, (int)!reject,
+        hila::gettime() - ttime);
+
+
+    if (reject) {
+        U[0] = U_old;
+    } else {
+        p.alpha = alpha;
+    }
+
+    hmcw_ms_timer.stop();
+}
+
+template <typename T, typename pT, typename atype = hila::arithmetic_type<T>>
+void do_hmc_measure(GaugeField<T> (&U)[2], const PlaquetteField<pT> &plaq_tbc_mode, parameters &p,
+                    const hmc_parameters &p_hmc) {
+
+    static hila::timer hmc_ms_timer("HMC (measure)");
+    hmc_ms_timer.start();
+
+    static bool first = true;
+    if (first) {
+        // print legend for measurement output
+        hila::out0 << "LHMC:          DIR        dS_EXT          TIME\n";
+        hila::out0 << "LHMCT:         DIR        dS_EXT        ACC.R.         TIME\n";
+        first = false;
+    }
+
+
+    auto alpha = p.alpha;
+
+    int ipdir = 1;
+    atype dalpha = p.dalpha / p.n_interp_steps; // step size of interpolating parameter
+    atype alpha0 = p.alpha;
+    if (alpha0 == 1) {
+        ipdir = -1;
+        dalpha = -dalpha;
+    }
+
+    atype ds = 0;
+    GaugeField<T> U_old = U[0];
+    GaugeField<T> tU_old = U[0];
+
+    VectorField<Algebra<T>> E;
+    double g_act_old, g_act_new, e_act_old, e_act_new, act_old, act_new;
+
+    ftype ttime = hila::gettime();
+
+    for (int n = 1; n < p.n_interp_steps; ++n) {
+        ds += p.beta * dalpha *
+              measure_ds_wplaq_dbcms(U, plaq_tbc_mode); // work done during n-th interpolation step
+        //hila::out0 << ds << "\n";
+        p.alpha = alpha0 + n * dalpha;
+
+        g_act_old = p.beta * measure_s(U, plaq_tbc_mode, p.alpha);
+
+        int nacc = 0;
+        int natt = 0;
+        for (int ihmc = 0; ihmc < 5; ++ihmc) {
+            ++natt;
+
+            foralldir(d) onsites(ALL) E[d][X].gaussian_random();
+
+            e_act_old = measure_e2(E) / 2;
+
+            act_old = g_act_old + e_act_old;
+
+            //do_hmc_leapfrog_step(U, plaq_tbc_mode, E, p.alpha, p.beta, p_hmc.dt);
+            do_hmc_trajectory(U, plaq_tbc_mode, p.alpha, E, p_hmc);
+
+            act_new = measure_action(U, plaq_tbc_mode, p.alpha, E, p_hmc, g_act_new, e_act_new);
+
+            bool accept = hila::broadcast(hila::random() < exp(-(act_new - act_old)));
+            //hila::out0 << act_old - act_new << " , " << (g_act_old - g_act_new) / p.beta << " , " << e_act_old - e_act_new << "\n";
+            if (accept) {
+                tU_old = U[0];
+                g_act_old = g_act_new;
+                ++nacc;
+            } else {
+                U[0] = tU_old;
+            }
+        }
+        if (n % (p.n_interp_steps / 10) == 0) {
+            hila::out0 << string_format("HMCT            % 1d % 0.6e      % 0.5f   % 10.5f\n", ipdir, ds,
+                                        (double)nacc / natt, hila::gettime() - ttime);
+        }
+    }
+    ds += p.beta * dalpha *
+          measure_ds_wplaq_dbcms(U, plaq_tbc_mode); // work done during last interpolation step
+
+    hila::out0 << string_format("HMC             % 1d % 0.6e    % 10.5f\n", ipdir, ds,
+                                hila::gettime() - ttime);
+
+    p.alpha = alpha;
+    U[0] = U_old;
+    hmc_ms_timer.stop();
+}
+
+// hmc functions
 ///////////////////////////////////////////////////////////////////////////////////
 // measurement functions
 
@@ -538,6 +747,7 @@ int main(int argc, char **argv) {
     // see file "input.h" for documentation
 
     parameters p;
+    hmc_parameters p_hmc;
 
     hila::input par("parameters");
 
@@ -564,6 +774,11 @@ int main(int argc, char **argv) {
     p.n_therm = par.get("thermalization trajs");
     // number of alpha-interpolation steps
     p.n_interp_steps = par.get("interpolation steps");
+    // hmc traj. length
+    p_hmc.n_steps = par.get("hmc steps");
+    // hmc traj. step width
+    p_hmc.dt = par.get("hmc step width");
+    p_hmc.beta = p.beta;
     // wilson flow frequency (number of traj. between w. flow measurement)
     p.gflow_freq = par.get("gflow freq");
     // wilson flow max. flow-distance
@@ -747,6 +962,11 @@ int main(int argc, char **argv) {
 
         if (trajectory >= 0 && p.n_interp_steps > 0) {
             do_hbbc_measure(U, plaq_tbc_mode, p);
+            // do_hmc_measure(U, plaq_tbc_mode, p, p_hmc);
+        }
+
+        if (trajectory >= 0 && p_hmc.n_steps > 0) {
+            do_hmc_measure_w(U, plaq_tbc_mode, p, p_hmc);
         }
 
         hila::out0 << "Measure_end " << trajectory << '\n';

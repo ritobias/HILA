@@ -69,19 +69,31 @@ void lattice_struct::setup_layout() {
 
     if(1) {
 
-        size_t max_ghosts_pd = 0;
+        CoordinateVector nsize;
+        int64_t ghosts[NDIM]; // int is too small
+        int64_t maxnghostl = 1;
         foralldir(d) {
-            size_t cosize = l_volume / size(d);
-            size_t n = size(d);
+            int64_t cosize = l_volume / size(d);
+            int64_t n = size(d);
             while ((n * cosize) % nn != 0)
                 n++; // virtual size can be odd
-            size_t tghosts = n - size(d);
-            if(tghosts > max_ghosts_pd) {
-                max_ghosts_pd = tghosts;
+            // now nsize is the new would-be size
+            int64_t tnghostl = n - size(d);
+            ghosts[d] = tnghostl * cosize;
+            nsize[d] = n;
+            if(tnghostl > maxnghostl) {
+                maxnghostl = tnghostl;
             }
         }
 
-        double g_nvol = (double)l_volume / (double)nn;  // node volume
+        int mdir = 0;
+
+        foralldir(j) if (ghosts[j] < ghosts[mdir]) mdir = j;
+        // mdir is the direction where we do uneven division (if done)
+        // hila::out0 << "MDIR " << mdir << " ghosts mdir " << ghosts[mdir] << " nsize " <<
+        // nsize[mdir] << '\n';
+
+        int64_t g_nvol = (l_volume + ghosts[mdir]) / nn;  // node volume
 
         // find node shape that minimizes boundary:
         std::vector<size_t> fx(NDIM);
@@ -89,17 +101,21 @@ void lattice_struct::setup_layout() {
         std::vector<std::vector<int>> nlxp(NDIM); //list of possible side lengths
         std::vector<std::vector<int>> ndivlxp(NDIM); // corresponding list of divisions
         foralldir(d) {
-            for (int gd = 0; gd <= max_ghosts_pd; ++gd) {
-                size_t maxsiz = size(d) + gd;
-                for (size_t i = 1; i < maxsiz; ++i) {
-                    if(maxsiz % i == 0 && nn % i == 0) {
+            size_t maxsiz;
+            for (int td = 0; td <= maxnghostl; ++td) {
+                maxsiz = size(d) + td;
+                //if(d == mdir) {
+                //    maxsiz = nsize[d];
+                //}
+                for (size_t i = 1; i <= maxsiz / 2; ++i) {
+                    if(maxsiz % i == 0 && nn % i == 0 && size(d) / i >= 2) {
                         nlxp[d].push_back(maxsiz / i);
                         ndivlxp[d].push_back(i);
                     }
                 }
             }
             fx[d] = 0;
-            tNx[d] = size(d) + max_ghosts_pd; // initial size is full (maximally ghosted) lattice
+            tNx[d] = maxsiz; // initial size is full (ghosted) lattice
             tndiv[d] = 1;
         }
 
@@ -108,6 +124,7 @@ void lattice_struct::setup_layout() {
         size_t minbndry = block_boundary_size(tNx) + 1; // initial boundary size
         size_t minV = 1;
         foralldir(d) minV *= tNx[d]; // initial volume
+        minV /= nn;
         size_t ttV, tbndry;
         bool succ = false;
         // now run through all shapes that can be formed with the side lengths listed in nlxp:
@@ -118,7 +135,7 @@ void lattice_struct::setup_layout() {
                 tndiv[d] = ndivlxp[d][fx[d]];
                 ttV *= tNx[d];
             }
-            if ((double)ttV >= g_nvol) {
+            if (ttV >= g_nvol) {
                 // shape fits the node volume
                 tbndry = block_boundary_size(tNx);
                 if (ttV < minV || (ttV == minV && tbndry < minbndry)) {

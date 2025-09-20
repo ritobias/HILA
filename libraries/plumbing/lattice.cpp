@@ -717,11 +717,9 @@ void lattice_struct::create_gen_std_gathers() {
                 //set buffer indices
 
                 from_node.buffer = c_offset; // location in fieldbuffer
-
                 from_node.buffer_s = buff_offset;
 
                 to_node.buffer = buff_offset;
-
                 to_node.buffer_s = buff_offset;
 
                 buff_offset += to_node.sites;
