@@ -101,17 +101,14 @@ void lattice_struct::setup_layout() {
         std::vector<std::vector<int>> nlxp(NDIM); //list of possible side lengths
         std::vector<std::vector<int>> ndivlxp(NDIM); // corresponding list of divisions
         foralldir(d) {
-            size_t maxsiz;
-            for (int td = 0; td <= maxnghostl; ++td) {
-                maxsiz = size(d) + td;
-                //if(d == mdir) {
-                //    maxsiz = nsize[d];
-                //}
-                for (size_t i = 1; i <= maxsiz / 2; ++i) {
-                    if(maxsiz % i == 0 && nn % i == 0 && size(d) / i >= 2) {
-                        nlxp[d].push_back(maxsiz / i);
-                        ndivlxp[d].push_back(i);
-                    }
+            size_t maxsiz = size(d);
+            if(d == mdir) {
+                maxsiz = nsize[d];
+            }
+            for (size_t i = 1; i <= maxsiz / 2; ++i) {
+                if(maxsiz % i == 0 && nn % i == 0 && size(d) / i >= 2) {
+                    nlxp[d].push_back(maxsiz / i);
+                    ndivlxp[d].push_back(i);
                 }
             }
             fx[d] = 0;
