@@ -17,7 +17,6 @@ void gather_test() {
                 << lattice.volume() << '\n';
         hila::terminate(1);
     }
-    hila::terminate(1);
 
 
 #ifndef GENGATHER
@@ -164,7 +163,7 @@ void gather_test() {
                         for (size_t i = 0; i < svol; ++i) {
                             l = lattice.global_coordinates(it * svol + i);
                             ln = (*(lattice.nn_map[inntopo]))(l, d);
-                            dif1 = abs(f1l[i] - ln);
+                            dif1 = f1l[i] - ln;
                             if (dif1.squarenorm() != 0) {
                                 hila::out0 << " gen std up-gather test error!"
                                            << " dir=" << (unsigned)d << " from node "
@@ -192,7 +191,7 @@ void gather_test() {
                         for (size_t i = 0; i < svol; ++i) {
                             l = lattice.global_coordinates(it * svol + i);
                             ln = (*(lattice.nn_map[inntopo]))(l, -d);
-                            dif2 = abs(f2l[i] - ln);
+                            dif2 = f2l[i] - ln;
                             if (dif2.squarenorm() != 0) {
                                 hila::out0 << " gen std down-gather test error!"
                                            << " dir=" << (unsigned)d << " from node "

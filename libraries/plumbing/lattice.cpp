@@ -845,7 +845,7 @@ void lattice_struct::initialize_wait_arrays() {
      * at that dir is out of the local volume
      */
 
-    wait_arr_ = (dir_mask_t *)memalloc(nn_map.size() * mynode.volume() * sizeof(dir_mask_t));
+    wait_arr_ = (dir_mask_t *)memalloc(mynode.volume() * sizeof(dir_mask_t));
 
     for (size_t i = 0; i < mynode.volume(); ++i) {
         wait_arr_[i] = 0; /* basic, no wait */
