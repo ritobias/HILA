@@ -97,7 +97,7 @@ void lattice_struct::setup_layout() {
         int64_t tghosts = -1;
         int mdir = 0;
         for (int imd = 0; imd < NDIM; ++imd) {
-            int mdir = ghosts[imd].c[0];
+            mdir = ghosts[imd].c[0];
             if(ghosts[imd].c[1] > tghosts) {
                 tghosts = ghosts[imd].c[1];
                 int64_t g_nvol = (l_volume + tghosts) / nn; // node volume
@@ -139,6 +139,8 @@ void lattice_struct::setup_layout() {
                         // shape fits the node volume
                         tbndry = block_boundary_size(tNx);
                         if (tbndry < minbndry) {
+                            hila::out0 << "node vol: " << ttV << ", node bd: " << tbndry
+                                       << " node shape: " << tNx << "\n";
                             // boundary of current shape is smaller than minbndry
                             //  -> update minbndry and nodesiz to current shape
                             minbndry = tbndry;
