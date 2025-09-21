@@ -3,6 +3,7 @@
 /// nodes, and if that fails allows slightly different
 /// node sizes.
 
+#include <algorithm>
 #include "plumbing/defs.h"
 #include "plumbing/lattice.h"
 
@@ -70,7 +71,10 @@ void lattice_struct::setup_layout() {
     if(1) {
 
         CoordinateVector nsize;
-        int64_t ghosts[NDIM]; // int is too small
+        struct idx_pair {
+            int64_t c[2];
+        };
+        std::vector<idx_pair> ghosts(NDIM); // int is too small
         int64_t maxnghostl = 1;
         foralldir(d) {
             int64_t cosize = l_volume / size(d);
@@ -79,83 +83,86 @@ void lattice_struct::setup_layout() {
                 n++; // virtual size can be odd
             // now nsize is the new would-be size
             int64_t tnghostl = n - size(d);
-            ghosts[d] = tnghostl * cosize;
+            ghosts[d] = {d, tnghostl * cosize};
             nsize[d] = n;
             if(tnghostl > maxnghostl) {
                 maxnghostl = tnghostl;
             }
         }
 
-        int mdir = 0;
+        std::stable_sort(ghosts.begin(), ghosts.end(),
+                         [](auto i1, auto i2) { return i1.c[1] < i2.c[1]; });
 
-        foralldir(j) if (ghosts[j] < ghosts[mdir]) mdir = j;
-        // mdir is the direction where we do uneven division (if done)
-        // hila::out0 << "MDIR " << mdir << " ghosts mdir " << ghosts[mdir] << " nsize " <<
-        // nsize[mdir] << '\n';
-
-        int64_t g_nvol = (l_volume + ghosts[mdir]) / nn;  // node volume
-
-        // find node shape that minimizes boundary:
-        std::vector<size_t> fx(NDIM);
-        CoordinateVector tNx, tndiv;
-        std::vector<std::vector<int>> nlxp(NDIM); //list of possible side lengths
-        std::vector<std::vector<int>> ndivlxp(NDIM); // corresponding list of divisions
-        foralldir(d) {
-            size_t maxsiz = size(d);
-            if(d == mdir) {
-                maxsiz = nsize[d];
-            }
-            for (size_t i = 1; i <= maxsiz / 2; ++i) {
-                if(maxsiz % i == 0 && nn % i == 0 && size(d) / i >= 2) {
-                    nlxp[d].push_back(maxsiz / i);
-                    ndivlxp[d].push_back(i);
-                }
-            }
-            fx[d] = 0;
-            tNx[d] = maxsiz; // initial size is full (ghosted) lattice
-            tndiv[d] = 1;
-        }
-
-        nodesiz = tNx;
-        nodes.n_divisions = tndiv;
-        size_t minbndry = block_boundary_size(tNx) + 1; // initial boundary size
-        size_t minV = 1;
-        foralldir(d) minV *= tNx[d]; // initial volume
-        minV /= nn;
-        size_t ttV, tbndry;
         bool succ = false;
-        // now run through all shapes that can be formed with the side lengths listed in nlxp:
-        while (true) {
-            ttV = 1;
-            foralldir(d) {
-                tNx[d] = nlxp[d][fx[d]];
-                tndiv[d] = ndivlxp[d][fx[d]];
-                ttV *= tNx[d];
-            }
-            if (ttV >= g_nvol) {
-                // shape fits the node volume
-                tbndry = block_boundary_size(tNx);
-                if (ttV < minV || (ttV == minV && tbndry < minbndry)) {
-                    // boundary of current shape is smaller than minbndry
-                    //  -> update minbndry and nodesiz to current shape
-                    minV = ttV;
-                    minbndry = tbndry;
-                    nodesiz = tNx;
-                    nodes.n_divisions = tndiv;
-                    succ = true;
-                }
-            }
+        int64_t tghosts = -1;
+        int mdir = 0;
+        for (int imd = 0; imd < NDIM; ++imd) {
+            int mdir = ghosts[imd].c[0];
+            if(ghosts[imd].c[1] > tghosts) {
+                tghosts = ghosts[imd].c[1];
+                int64_t g_nvol = (l_volume + tghosts) / nn; // node volume
 
-            // determine next shape in nlxp:
-            ++fx[0];
-            for (int d = 0; d < NDIM - 1; ++d) {
-                if(fx[d] >= nlxp[d].size()) {
-                    ++fx[d + 1];
+                // find node shape that minimizes boundary:
+                std::vector<size_t> fx(NDIM);
+                CoordinateVector tNx, tndiv;
+                std::vector<std::vector<int>> nlxp(NDIM); //list of possible side lengths
+                std::vector<std::vector<int>> ndivlxp(NDIM); // corresponding list of divisions
+                foralldir(d) {
+                    size_t maxsiz = size(d);
+                    if(d == mdir) {
+                        maxsiz = nsize[d];
+                    }
+                    for (size_t i = 1; i <= maxsiz / 2; ++i) {
+                        if(maxsiz % i == 0 && nn % i == 0 && size(d) / i >= 2) {
+                            nlxp[d].push_back(maxsiz / i);
+                            ndivlxp[d].push_back(i);
+                        }
+                    }
                     fx[d] = 0;
+                    tNx[d] = maxsiz; // initial size is full (ghosted) lattice
+                    tndiv[d] = 1;
+                }
+
+                nodesiz = tNx;
+                nodes.n_divisions = tndiv;
+                size_t minbndry = block_boundary_size(tNx) + 1; // initial boundary size
+                size_t ttV, tbndry;
+                // now run through all shapes that can be formed with the side lengths listed in nlxp:
+                while (true) {
+                    ttV = 1;
+                    foralldir(d) {
+                        tNx[d] = nlxp[d][fx[d]];
+                        tndiv[d] = ndivlxp[d][fx[d]];
+                        ttV *= tNx[d];
+                    }
+                    if (ttV == g_nvol) {
+                        // shape fits the node volume
+                        tbndry = block_boundary_size(tNx);
+                        if (tbndry < minbndry) {
+                            // boundary of current shape is smaller than minbndry
+                            //  -> update minbndry and nodesiz to current shape
+                            minbndry = tbndry;
+                            nodesiz = tNx;
+                            nodes.n_divisions = tndiv;
+                            succ = true;
+                        }
+                    }
+
+                    // determine next shape in nlxp:
+                    ++fx[0];
+                    for (int d = 0; d < NDIM - 1; ++d) {
+                        if(fx[d] >= nlxp[d].size()) {
+                            ++fx[d + 1];
+                            fx[d] = 0;
+                        }
+                    }
+                    if(fx[NDIM - 1] >= nlxp[NDIM - 1].size()) {
+                        // no more shapes left
+                        break;
+                    }
                 }
             }
-            if(fx[NDIM - 1] >= nlxp[NDIM - 1].size()) {
-                // no more shapes left
+            if(succ) {
                 break;
             }
         }
