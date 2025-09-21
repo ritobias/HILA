@@ -17,7 +17,7 @@ void gather_test() {
                 << lattice.volume() << '\n';
         hila::terminate(1);
     }
-
+    hila::terminate(1);
 
 
 #ifndef GENGATHER
