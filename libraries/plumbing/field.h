@@ -351,7 +351,6 @@ class Field {
                "Ref. Field with same nn_topo already exists");
         is_ref_of->has_refs[nn_topo] = this;
         allocate_with_ref(is_ref_of->fs, nn_topo);
-        mark_changed(ALL);
     }
     /**
      * @internal
@@ -498,16 +497,18 @@ class Field {
      */
     void free() {
         if (fs != nullptr && !hila::about_to_finish) {
+            drop_comms(ALL);
             has_refs[fs->nn_topo] = nullptr;
             if (!hila::about_to_finish) {
                 for (int i = 0; i < has_refs.size(); ++i) {
                     if (has_refs[i] != nullptr) {
+                        has_refs[i]->is_ref_of = nullptr;
                         has_refs[i]->free_with_ref();
+                        has_refs[i] = nullptr;
                     }
                 }
             }
-            for (Direction d = (Direction)0; d < NDIRS; ++d)
-                drop_comms(d, ALL);
+ 
             fs->free_payload();
             fs->free_communication();
             std::free(fs);
@@ -532,8 +533,8 @@ class Field {
         fs->initialize_communication();
         fs->assigned_to = otherfs->assigned_to;
         mark_changed(ALL); // guarantees communications will be done
-        for (Direction d = (Direction)0; d < NDIRS; ++d) {
 
+        for (Direction d = (Direction)0; d < NDIRS; ++d) {
 #if !defined(CUDA) && !defined(HIP)
             fs->neighbours[d] = lattice.neighb[d] + fs->nn_topo * lattice.mynode.volume();
 #else
@@ -567,11 +568,9 @@ class Field {
     void free_with_ref() {
         if (fs != nullptr && !hila::about_to_finish) {
             if(is_ref_of != nullptr) {
+                is_ref_of->drop_comms(ALL);
                 is_ref_of->has_refs[fs->nn_topo] = nullptr;
                 is_ref_of = nullptr;
-            }
-            for (Direction d = (Direction)0; d < NDIRS; ++d) {
-                drop_comms(d, ALL);
             }
             fs->free_payload_ref();
             fs->free_communication();
@@ -643,13 +642,13 @@ class Field {
      */
     void mark_changed(const Parity p) const {
         if(is_ref_of == nullptr) {
+            // check if there's ongoing comms, invalidate it!
+            drop_comms(opp_parity(p));
+
             for (int i = 0; i < has_refs.size(); ++i) {
                 if (has_refs[i] != nullptr) {
 
                     for (Direction d = (Direction)0; d < NDIRS; ++d) {
-                        // check if there's ongoing comms, invalidate it!
-                        has_refs[i]->drop_comms(d, opp_parity(p));
-
                         has_refs[i]->set_gather_status(opp_parity(p), d, gather_status_t::NOT_DONE);
                         if (p != ALL) {
                             has_refs[i]->set_gather_status(ALL, d, gather_status_t::NOT_DONE);
@@ -769,9 +768,7 @@ class Field {
             //nothing to do if nn_topo is same as current value
             return;
         }
-        for (Direction d = (Direction)0; d < NDIRS; ++d) {
-            drop_comms(d, ALL);
-        }
+        mark_changed(ALL);
         if (is_ref_of == nullptr) {
             assert(has_refs[nn_topo] == nullptr && "Ref. Field with same nn_topo already exists");
             has_refs[fs->nn_topo] = nullptr;
@@ -793,7 +790,6 @@ class Field {
                 lattice.backend_lattice->d_neighb[d] + fs->nn_topo * lattice.mynode.volume();
 #endif
         }
-        mark_changed(ALL);
     }
 
     /**
@@ -1458,6 +1454,7 @@ class Field {
     void wait_gather(Direction d, Parity p) const;
     void gather(Direction d, Parity p = ALL) const;
     void drop_comms(Direction d, Parity p) const;
+    void drop_comms(Parity p) const;
 
     /**
      * @brief Create a periodically shifted copy of the field
@@ -2214,31 +2211,52 @@ Field<T> Field<T>::shift(const CoordinateVector &v) const {
 ///  are not needed.
 template <typename T>
 void Field<T>::drop_comms(Direction d, Parity p) const {
-
     if (hila::is_comm_initialized()) {
-        if (is_gather_started(d, ALL)) {
-            drop_comms_timer.start();
-            wait_gather(d, ALL);
-            drop_comms_timer.stop();
-        }
-        if (p != ALL) {
-            if (is_gather_started(d, p)) {
-                drop_comms_timer.start();
-                wait_gather(d, p);
-                drop_comms_timer.stop();
+        if (is_ref_of == nullptr) {
+            for (int i = 0; i < has_refs.size(); ++i) {
+                if (has_refs[i] != nullptr) {
+                    if (is_gather_started(d, ALL)) {
+                        drop_comms_timer.start();
+                        has_refs[i]->wait_gather(d, ALL);
+                        drop_comms_timer.stop();
+                    }
+                    if (p != ALL) {
+                        if (is_gather_started(d, p)) {
+                            drop_comms_timer.start();
+                            has_refs[i]->wait_gather(d, p);
+                            drop_comms_timer.stop();
+                        }
+                    } else {
+                        if (is_gather_started(d, EVEN)) {
+                            drop_comms_timer.start();
+                            has_refs[i]->wait_gather(d, EVEN);
+                            drop_comms_timer.stop();
+                        }
+                        if (is_gather_started(d, ODD)) {
+                            drop_comms_timer.start();
+                            has_refs[i]->wait_gather(d, ODD);
+                            drop_comms_timer.stop();
+                        }
+                    }
+                }
             }
         } else {
-            if (is_gather_started(d, EVEN)) {
-                drop_comms_timer.start();
-                wait_gather(d, EVEN);
-                drop_comms_timer.stop();
-            }
-            if (is_gather_started(d, ODD)) {
-                drop_comms_timer.start();
-                wait_gather(d, ODD);
-                drop_comms_timer.stop();
-            }
+            is_ref_of->drop_comms(d, p);
         }
+    }
+}
+
+///  @internal
+///  drop_comms(): same as above but for all directions
+template <typename T>
+void Field<T>::drop_comms(Parity p) const {
+    if (is_ref_of == nullptr) {
+        for (Direction d = (Direction)0; d < NDIRS; ++d) {
+            // check if there's ongoing comms, invalidate it!
+            drop_comms(d, opp_parity(p));
+        }
+    } else {
+        is_ref_of->drop_comms(p);
     }
 }
 

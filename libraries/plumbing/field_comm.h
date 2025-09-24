@@ -372,7 +372,7 @@ dir_mask_t Field<T>::start_gather(Direction d, Parity p) const {
         unsigned sites = to_node.n_sites(par);
 
         if (fs->send_buffer[d] == nullptr)
-            fs->send_buffer[d] = fs->payload.allocate_mpi_buffer(lattice.comm_buffer_size[d]);
+            fs->send_buffer[d] = fs->payload.allocate_mpi_buffer(lattice.comm_buffer_size[-d]);
 
         send_buffer = fs->send_buffer[d] + to_node.offset(par);
 
@@ -433,7 +433,7 @@ dir_mask_t Field<T>::start_gather(Direction d, Parity p) const {
             unsigned sites = to_node.n_sites(par);
 
             if (fs->send_buffer[d] == nullptr)
-                fs->send_buffer[d] = fs->payload.allocate_mpi_buffer(lattice.comm_buffer_size[d]);
+                fs->send_buffer[d] = fs->payload.allocate_mpi_buffer(lattice.comm_buffer_size[-d]);
 
             send_buffer = fs->send_buffer[d] + to_node.offset(par);
 
