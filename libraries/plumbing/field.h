@@ -464,7 +464,7 @@ class Field {
         fs->initialize_communication();
         fs->assigned_to = 0; // and this means that it is not assigned
         mark_changed(ALL);   // guarantees communications will be done
-
+        fs->assigned_to = 0; // and this means that it is not assigned
         for (Direction d = (Direction)0; d < NDIRS; ++d) {
 
 #if !defined(CUDA) && !defined(HIP)

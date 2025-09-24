@@ -74,7 +74,6 @@ void gather_test() {
     onsites(ALL) {
         f[X] = X.coordinates();
     }
-
     for (int inntopo = 0; inntopo < lattice.nn_map.size(); ++inntopo) {
         //hila::out << "rank " << hila::myrank() << " : testing nn_map_" << inntopo << "\n";
         hila::out0 << "testing nn_map_" << inntopo << "\n";
@@ -147,7 +146,7 @@ void gather_test() {
         // hila::out << "rank " << hila::myrank() << " : nn-topo switched to " << inntopo << "\n";
         bool terminate = false;
         foralldir(d) {
-            {
+            if(!terminate) {
                 Field<CoordinateVector> f1;
                 onsites(ALL) {
                     f1[X] = f[X + d];
@@ -177,7 +176,7 @@ void gather_test() {
                     }
                 }
             }
-            {
+            if (!terminate) {
                 Field<CoordinateVector> f2;
                 onsites(ALL) {
                     f2[X] = f[X - d];
@@ -225,7 +224,7 @@ void gather_test() {
         Field<CoordinateVector> rf(f, 0);
         bool terminate = false;
         foralldir(d) {
-            {
+            if (!terminate) {
                 Field<CoordinateVector> f1;
                 onsites(ALL) {
                     f1[X] = rf[X + d];
@@ -255,7 +254,7 @@ void gather_test() {
                     }
                 }
             }
-            {
+            if (!terminate) {
                 Field<CoordinateVector> f2;
                 onsites(ALL) {
                     f2[X] = rf[X - d];
