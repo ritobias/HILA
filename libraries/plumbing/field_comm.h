@@ -290,9 +290,14 @@ dir_mask_t Field<T>::start_gather(Direction d, Parity p) const {
     bool ok = true;
     for (size_t inode = 0; inode < from_nodel.size(); ++inode) {
         lattice_struct::comm_node_struct &from_node = from_nodel[inode];
+        if (from_node.rank != hila::myrank()) {
+            ok = false;
+            break;
+        }
+    }
+    for (size_t inode = 0; inode < to_nodel.size(); ++inode) {
         lattice_struct::comm_node_struct &to_node = to_nodel[inode];
-
-        if (from_node.rank != hila::myrank() || to_node.rank != hila::myrank()) {
+        if (to_node.rank != hila::myrank()) {
             ok = false;
             break;
         }
@@ -400,8 +405,6 @@ dir_mask_t Field<T>::start_gather(Direction d, Parity p) const {
 #else
     for (size_t inode = 0; inode < from_nodel.size(); ++inode) {
         lattice_struct::comm_node_struct &from_node = from_nodel[inode];
-        lattice_struct::comm_node_struct &to_node = to_nodel[inode];
-
         if (from_node.rank != hila::myrank()) {
 
             // HANDLE RECEIVES: get node which will send here
@@ -426,7 +429,9 @@ dir_mask_t Field<T>::start_gather(Direction d, Parity p) const {
 
             post_receive_timer.stop();
         }
-
+    }
+    for (size_t inode = 0; inode < to_nodel.size(); ++inode) {
+        lattice_struct::comm_node_struct &to_node = to_nodel[inode];
         if (to_node.rank != hila::myrank()) {
             // HANDLE SENDS: Copy Field elements on the boundary to a send buffer and send
 
@@ -578,10 +583,15 @@ void Field<T>::wait_gather(Direction d, Parity p) const {
     bool ok = true;
     for (size_t inode = 0; inode < from_nodel.size(); ++inode) {
         lattice_struct::comm_node_struct &from_node = from_nodel[inode];
-        lattice_struct::comm_node_struct &to_node = to_nodel[inode];
-
-        if (from_node.rank != hila::myrank() || to_node.rank != hila::myrank())
+        if (from_node.rank != hila::myrank())
             ok = false;
+    }
+    if(ok) {
+        for (size_t inode = 0; inode < to_nodel.size(); ++inode) {
+            lattice_struct::comm_node_struct &to_node = to_nodel[inode];
+            if (to_node.rank != hila::myrank())
+                ok = false;
+        }
     }
     if(ok) {
         return;
@@ -629,7 +639,6 @@ void Field<T>::wait_gather(Direction d, Parity p) const {
   
         for (size_t inode = 0; inode < from_nodel.size(); ++inode) {
             lattice_struct::comm_node_struct &from_node = from_nodel[inode];
-            lattice_struct::comm_node_struct &to_node = to_nodel[inode];
 
             if (from_node.rank != hila::myrank() && boundary_need_to_communicate(d)) {
                 wait_receive_timer.start();
@@ -640,7 +649,10 @@ void Field<T>::wait_gather(Direction d, Parity p) const {
                 fs->place_comm_elements(d, par, fs->get_receive_buffer(d, par, from_node), from_node);
 #endif
             }
+        }
 
+        for (size_t inode = 0; inode < to_nodel.size(); ++inode) {
+            lattice_struct::comm_node_struct &to_node = to_nodel[inode];
             // then wait for the sends
             if (to_node.rank != hila::myrank() && boundary_need_to_communicate(-d)) {
                 wait_send_timer.start();
