@@ -123,7 +123,7 @@ template <typename T, typename pT, typename atype = hila::arithmetic_type<T>>
 void move_filtered(const Field<T> (&S)[2], const Field<pT> &bcmsid, const Direction &d, bool both_dirs,
                      out_only Field<T> &Sd, const parameters &p) {
 
-    move_filtered_k(S, bcmsid, d, both_dirs, Sd, p);
+    move_filtered_p(S, bcmsid, d, both_dirs, Sd, p);
 }
 
 template <typename T, typename pT, typename atype = hila::arithmetic_type<T>>
@@ -424,7 +424,7 @@ int main(int argc, char **argv) {
     p.s = par.get("replica number");
     // entangling region slab width
     p.l = par.get("momentum scale");
-    p.bcms = 0;
+    p.bcms = -1;
     // number of trajectories
     p.n_traj = par.get("number of trajectories");
     // hmc trajectory length
@@ -470,7 +470,7 @@ int main(int argc, char **argv) {
         auto k = X.coordinates().convert_to_k();
         ftype sknorm = 0;
         for (int d = 0; d < NDIM - 1; ++d) {
-            sknorm += k[d] * k[d];
+            sknorm += (ftype)k[d] * (ftype)k[d];
         }
         sknorm = sqrt(sknorm);
         bcmsid[X] = sknorm;
@@ -480,9 +480,9 @@ int main(int argc, char **argv) {
     // use negative trajectory for thermal
     int start_traj = -p.n_therm;
 
-    // Alloc gauge field (S) and gauge momentum field (E)
+    // Alloc field (S) and momentum field (E)
     Field<myfield> S[2]{0,0};
-    Field<myfield> E, S_back;
+    Field<myfield> E, S_back = 0;
 
     if (!restore_checkpoint(S[0], start_traj, p)) {
         S[0] = 0;
@@ -551,30 +551,18 @@ int main(int argc, char **argv) {
 
         act_new = measure_action(S, bcmsid, E, p, s_new);
 
-        bool reject = hila::broadcast(exp(act_old - act_new) < hila::random());
-
-        if (trajectory < 0) {
-            // during thermalization: keep track of number of rejected trajectories
-            if (reject) {
-                ++nreject;
-                --trajectory; // repeat trajectories that were rejected during thermalization
-            } else {
-                if (nreject > 0) {
-                    --nreject;
-                }
-            }
-        }
+        bool accept = hila::broadcast(hila::random() < exp(act_old - act_new));
 
         hila::out0 << std::setprecision(12) << "HMC " << trajectory << " S_TOT_start " << act_old
                    << " dS_TOT " << std::setprecision(6) << act_new - act_old
                    << std::setprecision(12);
-        if (reject) {
-            hila::out0 << " REJECT" << " --> S " << s_old;
-            onsites(ALL) S[0][X] = S_back[X];
-        } else {
+        if (accept) {
             hila::out0 << " ACCEPT" << " --> S " << s_new;
             onsites(ALL) S_back[X] = S[0][X];
             s_old = s_new;
+        } else {
+            hila::out0 << " REJECT" << " --> S " << s_old;
+            onsites(ALL) S[0][X] = S_back[X];
         }
 
         update_timer.stop();
@@ -594,8 +582,20 @@ int main(int argc, char **argv) {
         measure_timer.stop();
 
         // create checkpoint (when it's time):
-        if (p.n_save > 0 && (trajectory + 1) % p.n_save == 0) {
+        if (p.n_save > 0 && abs(trajectory + 1) % p.n_save == 0) {
             checkpoint(S[0], trajectory, p);
+        }
+
+        if (trajectory < 0) {
+            // during thermalization: keep track of number of rejected trajectories
+            if (!accept) {
+                ++nreject;
+                --trajectory; // repeat trajectories that were rejected during thermalization
+            } else {
+                if (nreject > 0) {
+                    --nreject;
+                }
+            }
         }
     }
 

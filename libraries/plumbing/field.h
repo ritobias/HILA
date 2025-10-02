@@ -647,7 +647,6 @@ class Field {
 
             for (int i = 0; i < has_refs.size(); ++i) {
                 if (has_refs[i] != nullptr) {
-
                     for (Direction d = (Direction)0; d < NDIRS; ++d) {
                         has_refs[i]->set_gather_status(opp_parity(p), d, gather_status_t::NOT_DONE);
                         if (p != ALL) {
