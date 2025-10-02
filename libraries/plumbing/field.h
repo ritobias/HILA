@@ -1074,8 +1074,9 @@ class Field {
                     // current field is referncing to field buffer of another field
                     tfld = is_ref_of;
                 }
-                // replace current field buffer by field buffer of rhs field:
+                // wait for ongoing communication
                 tfld->drop_comms(ALL);
+                // replace current field buffer by field buffer of rhs field:
                 tfld->fs->payload.free_field();
                 tfld->fs->payload.set_field_ref(lattice, rhs.fs->payload);
 
