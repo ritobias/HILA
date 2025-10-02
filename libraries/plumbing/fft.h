@@ -448,10 +448,22 @@ Field<T> Field<T>::FFT(const CoordinateVector &dirs, fft_direction fftdir) const
 }
 
 template <typename T>
+void Field<T>::FFT(const CoordinateVector &dirs, out_only Field<T> &res, fft_direction fftdir) const {
+    FFT_field(*this, res, dirs, fftdir);
+}
+
+template <typename T>
 Field<T> Field<T>::FFT(fft_direction fftdir) const {
     CoordinateVector cv;
     cv.fill(true);
     return FFT(cv, fftdir);
+}
+
+template <typename T>
+void Field<T>::FFT(out_only Field<T> &res, fft_direction fftdir) const {
+    CoordinateVector cv;
+    cv.fill(true);
+    FFT(cv, res, fftdir);
 }
 
 

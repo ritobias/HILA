@@ -87,7 +87,7 @@ void move_filtered_k(const Field<T> (&S)[2], const Field<pT> &bcmsid, const Dire
                 tS[X] = Complex<atype>(tvec[inc], 0);
             }
         }
-        SK[0] = tS.FFT(fftdirs);
+        tS.FFT(fftdirs, SK[0]);
         if(both_dirs) {
             SK[1].start_gather(-d);
             SK[0].start_gather(-d);
@@ -108,9 +108,9 @@ void move_filtered_k(const Field<T> (&S)[2], const Field<pT> &bcmsid, const Dire
                 }
             }
         }
-        tS = tSK.FFT(fftdirs, fft_direction::back) / svol;
+        tSK.FFT(fftdirs, tS, fft_direction::back);
         onsites(ALL) {
-            Complex<atype> tc = tS[X];
+            Complex<atype> tc = tS[X] / svol;
             Sd[X][inc] = tc.real();
             if (inc + 1 < T::size()) {
                 Sd[X][inc + 1] = tc.imag();

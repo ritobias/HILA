@@ -1671,7 +1671,10 @@ class Field {
 
     // Fourier transform declaration
     Field<T> FFT(fft_direction fdir = fft_direction::forward) const;
+    void FFT(Field<T> &res, fft_direction fdir = fft_direction::forward) const;
     Field<T> FFT(const CoordinateVector &dirs, fft_direction fdir = fft_direction::forward) const;
+    void FFT(const CoordinateVector &dirs, Field<T> &res,
+             fft_direction fdir = fft_direction::forward) const;
 
     Field<Complex<hila::arithmetic_type<T>>>
     FFT_real_to_complex(fft_direction fdir = fft_direction::forward) const;
