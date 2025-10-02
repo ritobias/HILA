@@ -4,7 +4,7 @@ lattice size           18,12,12,24
 kappa                  0.9
 lambda                 2.5
 replica number         2
-momentum scale         0
+momentum scale         0.5
 number of trajectories 220
 hmc trajlen            100
 hmc step width         0.01

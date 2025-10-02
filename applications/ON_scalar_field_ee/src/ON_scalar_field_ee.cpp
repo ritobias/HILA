@@ -53,9 +53,9 @@ void move_filtered_p(const Field<T> (&S)[2], const Field<pT> &bcmsid, const Dire
     if (both_dirs) {
         onsites(ALL) {
             if (bcmsid[X] <= p.bcms) {
-                Sd[X] = S[1][X - d];
+                Sd[X] += S[1][X - d];
             } else {
-                Sd[X] = S[0][X - d];
+                Sd[X] += S[0][X - d];
             }
         }
     }
@@ -123,7 +123,7 @@ template <typename T, typename pT, typename atype = hila::arithmetic_type<T>>
 void move_filtered(const Field<T> (&S)[2], const Field<pT> &bcmsid, const Direction &d, bool both_dirs,
                      out_only Field<T> &Sd, const parameters &p) {
 
-    move_filtered_p(S, bcmsid, d, both_dirs, Sd, p);
+    move_filtered_k(S, bcmsid, d, both_dirs, Sd, p);
 }
 
 template <typename T, typename pT, typename atype = hila::arithmetic_type<T>>

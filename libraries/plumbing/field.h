@@ -767,7 +767,7 @@ class Field {
             //nothing to do if nn_topo is same as current value
             return;
         }
-        mark_changed(ALL);
+        drop_comms(ALL);
         if (is_ref_of == nullptr) {
             assert(has_refs[nn_topo] == nullptr && "Ref. Field with same nn_topo already exists");
             has_refs[fs->nn_topo] = nullptr;
@@ -789,6 +789,7 @@ class Field {
                 lattice.backend_lattice->d_neighb[d] + fs->nn_topo * lattice.mynode.volume();
 #endif
         }
+        mark_changed(ALL);
     }
 
     /**
@@ -1074,7 +1075,8 @@ class Field {
                     tfld = is_ref_of;
                 }
                 // replace current field buffer by field buffer of rhs field:
-                tfld->fs->payload.free_field(); 
+                tfld->drop_comms(ALL);
+                tfld->fs->payload.free_field();
                 tfld->fs->payload.set_field_ref(lattice, rhs.fs->payload);
 
                 // remove potential reference to field buffer from rhs field:
@@ -1091,6 +1093,7 @@ class Field {
                         tfld->has_refs[i]->fs->payload.set_field_ref(lattice, tfld->fs->payload);
                     }
                 }
+                tfld->mark_changed(ALL);
             } else {
                 // current field has not been initialized; will steel all data from rhs field:
                 fs = rhs.fs; // steel whole field_struct
