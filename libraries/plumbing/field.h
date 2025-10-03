@@ -461,7 +461,7 @@ class Field {
         has_refs[0] = this;
         fs->allocate_payload();
         fs->initialize_communication();
-        fs->assigned_to = 0; // and this means that it is not assigned
+        fs->assigned_to = 0; 
         mark_changed(ALL);   // guarantees communications will be done
         fs->assigned_to = 0; // and this means that it is not assigned
         for (Direction d = (Direction)0; d < NDIRS; ++d) {
@@ -767,7 +767,7 @@ class Field {
             //nothing to do if nn_topo is same as current value
             return;
         }
-        drop_comms(ALL);
+        mark_changed(ALL);
         if (is_ref_of == nullptr) {
             assert(has_refs[nn_topo] == nullptr && "Ref. Field with same nn_topo already exists");
             has_refs[fs->nn_topo] = nullptr;
@@ -789,7 +789,6 @@ class Field {
                 lattice.backend_lattice->d_neighb[d] + fs->nn_topo * lattice.mynode.volume();
 #endif
         }
-        mark_changed(ALL);
     }
 
     /**
@@ -1062,7 +1061,7 @@ class Field {
      * @return Field<T>&
      */
     Field<T> &operator=(Field<T> &&rhs) {
-        if (this != &rhs) {
+        if (this != &rhs && rhs.fs != nullptr) {
             if(fs != nullptr) {
                 // to preserve referencing relations of the current field, we only steel the
                 // payload field buffer from the rhs field
@@ -1076,6 +1075,7 @@ class Field {
                 }
                 // wait for ongoing communication
                 tfld->drop_comms(ALL);
+                rhs.drop_comms(ALL);
                 // replace current field buffer by field buffer of rhs field:
                 tfld->fs->payload.free_field();
                 tfld->fs->payload.set_field_ref(lattice, rhs.fs->payload);
@@ -1094,6 +1094,7 @@ class Field {
                         tfld->has_refs[i]->fs->payload.set_field_ref(lattice, tfld->fs->payload);
                     }
                 }
+                // mark field as changed:
                 tfld->mark_changed(ALL);
             } else {
                 // current field has not been initialized; will steel all data from rhs field:

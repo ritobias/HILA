@@ -128,6 +128,7 @@ void lattice_struct::setup_layout() {
                 size_t minbndry = block_boundary_size(tNx) + 1; // initial boundary size
                 size_t ttV, tbndry;
                 // now run through all shapes that can be formed with the side lengths listed in nlxp:
+                hila::out0 << "minimizing node boundary area:\n";
                 while (true) {
                     ttV = 1;
                     foralldir(d) {
@@ -139,7 +140,7 @@ void lattice_struct::setup_layout() {
                         // shape fits the node volume
                         tbndry = block_boundary_size(tNx);
                         if (tbndry < minbndry) {
-                            hila::out0 << "node vol: " << ttV << ", node bd: " << tbndry
+                            hila::out0 << "  node vol: " << ttV << ", node bd area: " << tbndry
                                        << " node shape: " << tNx << "\n";
                             // boundary of current shape is smaller than minbndry
                             //  -> update minbndry and nodesiz to current shape
