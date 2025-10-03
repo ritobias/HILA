@@ -70,13 +70,13 @@ void move_filtered_k(const Field<T> (&S)[2], const Field<pT> &bcmsid, const Dire
 
     // define direction in which Fourier transform should be taken
     CoordinateVector fftdirs(0);
-    foralldir(d) if(d != e_t) fftdirs += d;
+    foralldir(d) if(d < NDIM - 1) fftdirs += d;
 
     Field<Complex<atype>> tS, tSK;
     Field<Complex<atype>> SK[2];
     SK[0] = 0;
     SK[1].make_ref_to(SK[0], 1);
-    double svol = lattice.volume() / lattice.size(e_t);
+    double svol = lattice.volume() / lattice.size(NDIM - 1);
     Sd = 0;
     for (int inc = 0; inc < T::size(); inc += 2) {
         onsites(ALL) {
@@ -133,7 +133,7 @@ double measure_s(const Field<T>(&S)[2], const Field<pT> &bcmsid, const parameter
     Field<T> Sd;
     // hopping terms in all directions:
     foralldir(d) {
-        if(d != e_t) {
+        if(d < NDIM - 1) {
             onsites(ALL) {
                 s += -p.kappa * S[0][X].dot(S[0][X + d]);
             }
@@ -161,7 +161,7 @@ void get_force_add(const Field<T> (&S)[2], const Field<pT> &bcmsid, Field<T> &K,
     // force from hopping terms in all directions:
     atype th = eps * p.kappa;
     foralldir(d) {
-        if (d != e_t) {
+        if (d < NDIM - 1) {
             S[0].start_gather(-d);
             onsites(ALL) K[X] += th * S[0][X + d];
 
@@ -311,13 +311,13 @@ public:
     int Nts;
     u_nn_map_t(const CoordinateVector &tlsize, int ts) : nn_map_t(tlsize), s(ts) {
         hila::out0 << "using user-defined nn-mapping with s=" << s << " replica";
-        if(s > 0 && lsize[e_t] % s == 0) { 
-            Nts = lsize[e_t] / s;
+        if(s > 0 && lsize[NDIM - 1] % s == 0) { 
+            Nts = lsize[NDIM - 1] / s;
             hila::out0 << " of temporal extent Nts=" << Nts << "\n";
         } else {
             s = 1;
-            Nts = lsize[e_t];
-            hila::out0 << "  error: Nt=" << lsize[e_t] << " not divisible by s=" << s << "\n";
+            Nts = lsize[NDIM - 1];
+            hila::out0 << "  error: Nt=" << lsize[NDIM - 1] << " not divisible by s=" << s << "\n";
             hila::terminate(1);
         }
     }
@@ -327,17 +327,17 @@ public:
     CoordinateVector operator()(const CoordinateVector &c, const Direction &d) {
         CoordinateVector cn;
         cn = c + d;
-        if(d==e_t) {
+        if(d == NDIM - 1) {
             for (int ts = s; ts > 0; --ts) {
-                if (cn[e_t] == ts * Nts) {
-                    cn[e_t] = (ts - 1) * Nts;
+                if (cn[NDIM - 1] == ts * Nts) {
+                    cn[NDIM - 1] = (ts - 1) * Nts;
                     break;
                 }
             }
-        } else if(d==e_t_down) {
+        } else if(-d == NDIM - 1) {
             for (int ts = 0; ts < s; ++ts) {
-                if (c[e_t] == ts * Nts) {
-                    cn[e_t] = (ts + 1) * Nts - 1;
+                if (c[NDIM - 1] == ts * Nts) {
+                    cn[NDIM - 1] = (ts + 1) * Nts - 1;
                     break;
                 }
             }
@@ -351,13 +351,15 @@ public:
             //cn[e_z] -= 1;
             cn[e_y] = lsize[e_y] - 1;
         }
-        if (cn[e_z] >= lsize[e_z]) {
-            //cn[e_x] += 1;
-            cn[e_z] = 0;
-        }
-        if (cn[e_z] < 0) {
-            //cn[e_x] -= 1;
-            cn[e_z] = lsize[e_z] - 1;
+        if(NDIM > 2) {
+            if (cn[e_z] >= lsize[e_z]) {
+                //cn[e_x] += 1;
+                cn[e_z] = 0;
+            }
+            if (cn[e_z] < 0) {
+                //cn[e_x] -= 1;
+                cn[e_z] = lsize[e_z] - 1;
+            }
         }
         if (cn[e_x] >= lsize[e_x]) {
             cn[e_x] = 0;
@@ -375,16 +377,16 @@ CoordinateVector bcms_coordinates(bT bcms, const Field<bT> &bcmsid) {
     Reduction<int> c = 0;
     c.allreduce(true).delayed(true);
     CoordinateVector cres;
-    for (Direction d = e_x; d < NDIM - 1; ++d) {
+    for (Direction d = Direction(0); d < NDIM - 1; ++d) {
         c = 0;
         onsites(ALL) {
-            if (bcmsid[X] == bcms && X.t() == lattice.size(e_t) - 1) {
+            if (bcmsid[X] == bcms && X.coordinate(Direction(NDIM - 1)) == lattice.size(NDIM - 1) - 1) {
                 c += X.coordinate(d);
             }
         }
         cres[d] = c.value();
     }
-    cres[e_t] = 0;
+    cres[NDIM - 1] = 0;
     return cres;
 }
 

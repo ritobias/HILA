@@ -3,6 +3,7 @@
 #%     make [ON_scalar_field_ee]        - build ON_scalar_field_ee program
 #% ON_scalar_field_ee make options 
 #%     NCOL=<N>              - O(N) scalar field (default: 4)
+#%     NDIM=D                - number of dimensions D of the lattice
 #% 
 
 # Give the location of the top level distribution directory wrt. this location.
@@ -11,6 +12,8 @@ HILA_DIR := ../..
 
 # Number of colors
 NCOL := 4
+# Number of dimensions
+NDIM := 4
 
 ifndef ARCH
 ARCH := vanilla
@@ -26,7 +29,7 @@ include $(HILA_DIR)/libraries/main.mk
 #HILAPP_OPTS += -comment-pragmas
 HILAPP_OPTS += -check-init
 
-APP_OPTS += -DNDIM=4 -DNCOLOR=${NCOL} -DGENGATHER
+APP_OPTS += -DNDIM=${NDIM} -DNCOLOR=${NCOL} -DGENGATHER
 
 ifdef SUN_OVERRELAX_dFJ
 APP_OPTS += -DSUN_OVERRELAX_dFJ
@@ -35,10 +38,10 @@ endif
 # With multiple targets we want to use "make target", not "make build/target".
 # This is needed to carry the dependencies to build-subdir
 
-ON_scalar_field_ee: build/O${NCOL}_scalar_field_ee_${ARCH} ; @:
+ON_scalar_field_ee: build/O${NCOL}_scalar_field_ee_d${NDIM}_${ARCH} ; @:
 
 # Now the linking step for each target executable
-build/O${NCOL}_scalar_field_ee_${ARCH}: Makefile build/ON_scalar_field_ee.o $(HILA_OBJECTS) $(HEADERS)
+build/O${NCOL}_scalar_field_ee_d${NDIM}_${ARCH}: Makefile build/ON_scalar_field_ee.o $(HILA_OBJECTS) $(HEADERS)
 	$(LD) -o $@ build/ON_scalar_field_ee.o $(HILA_OBJECTS) $(LDFLAGS) $(LDLIBS) 
 
 

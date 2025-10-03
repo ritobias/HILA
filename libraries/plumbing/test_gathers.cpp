@@ -74,6 +74,10 @@ void gather_test() {
     onsites(ALL) {
         f[X] = X.coordinates();
     }
+    size_t svol = lattice.volume() / lattice.size(NDIM - 1);
+    CoordinateVector tslice;
+    foralldir(d) tslice[d] = -1;
+
     for (int inntopo = 0; inntopo < lattice.nn_map.size(); ++inntopo) {
         //hila::out << "rank " << hila::myrank() << " : testing nn_map_" << inntopo << "\n";
         hila::out0 << "testing nn_map_" << inntopo << "\n";
@@ -88,9 +92,9 @@ void gather_test() {
                 }
                 // Since (*lattice.nn_map)(l, d) can't be called inside site-loop, we transfer the
                 // field to node 0
-                size_t svol = lattice.volume() / lattice.size(e_t);
-                for (int it = 0; it < lattice.size(e_t); ++it) {
-                    auto f1l = f1.get_slice({-1, -1, -1, it});
+                for (int it = 0; it < lattice.size(NDIM - 1); ++it) {
+                    tslice[NDIM - 1] = it;
+                    auto f1l = f1.get_slice(tslice);
                     if (hila::myrank() == 0) {
                         CoordinateVector l, ln;
                         CoordinateVector dif1 = 0;
@@ -116,9 +120,9 @@ void gather_test() {
                 onsites(ALL) {
                     f2[X] = f[X - d];
                 }
-                size_t svol = lattice.volume() / lattice.size(e_t);
-                for (int it = 0; it < lattice.size(e_t); ++it) {
-                    auto f2l = f2.get_slice({-1, -1, -1, it});
+                for (int it = 0; it < lattice.size(NDIM - 1); ++it) {
+                    tslice[NDIM - 1] = it;
+                    auto f2l = f2.get_slice(tslice);
                     if (hila::myrank() == 0) {
                         CoordinateVector l, ln;
                         CoordinateVector dif2 = 0;
@@ -166,9 +170,9 @@ void gather_test() {
                 }
                 // Since (*lattice.nn_map)(l, d) can't be called inside site-loop, we transfer the
                 // field to node 0 (should probably be turned off for large lattices)
-                size_t svol = lattice.volume() / lattice.size(e_t);
-                for (int it = 0; it < lattice.size(e_t); ++it) {
-                    auto f1l = f1.get_slice({-1, -1, -1, it});
+                for (int it = 0; it < lattice.size(NDIM - 1); ++it) {
+                    tslice[NDIM - 1] = it;
+                    auto f1l = f1.get_slice(tslice);
                     if (hila::myrank() == 0) {
                         CoordinateVector l, ln;
                         CoordinateVector dif1 = 0;
@@ -194,9 +198,9 @@ void gather_test() {
                 onsites(ALL) {
                     f2[X] = rf[X - d];
                 }
-                size_t svol = lattice.volume() / lattice.size(e_t);
-                for (int it = 0; it < lattice.size(e_t); ++it) {
-                    auto f2l = f2.get_slice({-1, -1, -1, it});
+                for (int it = 0; it < lattice.size(NDIM - 1); ++it) {
+                    tslice[NDIM - 1] = it;
+                    auto f2l = f2.get_slice(tslice);
                     if (hila::myrank() == 0) {
                         CoordinateVector l, ln;
                         CoordinateVector dif2 = 0;
