@@ -1,10 +1,12 @@
 # This is a parameter file for ON_scalar_field_ee
 
 lattice size           18,12,24
-kappa                  0.9
+kappa                  0.7
 lambda                 2.5
 replica number         2
-momentum scale         0.5
+momentum scale l       0.3
+momentum scale lc      0.4
+alpha                  0
 number of trajectories 220
 hmc trajlen            100
 hmc step width         0.01

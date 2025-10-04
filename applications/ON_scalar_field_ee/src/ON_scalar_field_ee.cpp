@@ -16,8 +16,9 @@ struct parameters {
     ftype kappa;        // hopping parameter
     ftype lambda;       // phi^4 coupling (lattice definition)
     int s;              // number of replicas
-    ftype l;            // entangling region slab width
-    ftype alpha;        // interpolation parameter
+    ftype l;            // momentum space entangling region slab width l
+    ftype lc;           // momentum space entangling region slab width lc
+    ftype alpha;        // interpolation parameter between l and lc
     ftype bcms;
     int n_traj;         // number of trajectories to generate
     int trajlen;        // HMC integration trajectory length
@@ -69,8 +70,9 @@ void move_filtered_k(const Field<T> (&S)[2], const Field<pT> &bcmsid, const Dire
     // where |k_s| is encded in bcmsid[X].
 
     // define direction in which Fourier transform should be taken
-    CoordinateVector fftdirs(0);
-    foralldir(d) if(d < NDIM - 1) fftdirs += d;
+    CoordinateVector fftdirs;
+    foralldir(d) if(d < NDIM - 1) fftdirs[d] = 1;
+    fftdirs[NDIM - 1] = 0;
 
     Field<Complex<atype>> tS, tSK;
     Field<Complex<atype>> SK[2];
@@ -96,7 +98,11 @@ void move_filtered_k(const Field<T> (&S)[2], const Field<pT> &bcmsid, const Dire
             if (bcmsid[X] <= p.l) {
                 tSK[X] = SK[1][X + d];
             } else {
-                tSK[X] = SK[0][X + d];
+                if (bcmsid[X] <= p.lc) {
+                    tSK[X] = p.alpha * SK[1][X + d] + (1.0 - p.alpha) * SK[0][X + d];
+                } else {
+                    tSK[X] = SK[0][X + d];
+                }
             }
         }
         if(both_dirs) {
@@ -104,7 +110,11 @@ void move_filtered_k(const Field<T> (&S)[2], const Field<pT> &bcmsid, const Dire
                 if (bcmsid[X] <= p.l) {
                     tSK[X] += SK[1][X - d];
                 } else {
-                    tSK[X] += SK[0][X - d];
+                    if (bcmsid[X] <= p.lc) {
+                        tSK[X] += p.alpha * SK[1][X - d] + (1.0 - p.alpha) * SK[0][X - d];
+                    } else {
+                        tSK[X] += SK[0][X - d];
+                    }
                 }
             }
         }
@@ -151,6 +161,61 @@ double measure_s(const Field<T>(&S)[2], const Field<pT> &bcmsid, const parameter
     }
 
     return s.value();
+}
+
+template <typename T, typename pT, typename atype = hila::arithmetic_type<T>>
+double measure_ds_dalpha(const Field<T> (&S)[2], const Field<pT> &bcmsid, const parameters &p) {
+    // define direction in which Fourier transform should be taken
+    CoordinateVector fftdirs;
+    foralldir(d) if (d < NDIM - 1) fftdirs[d] = 1;
+    fftdirs[NDIM - 1] = 0;
+
+    Reduction<double> ds = 0;
+    ds.allreduce(false).delayed(true);
+    Field<T> Sd;
+
+    Field<Complex<atype>> tS, tSK;
+    Field<Complex<atype>> SK[2];
+    SK[0] = 0;
+    SK[1].make_ref_to(SK[0], 1);
+    double svol = lattice.volume() / lattice.size(NDIM - 1);
+    Sd = 0;
+
+    // hopping terms in direction d
+    Direction d = Direction(NDIM - 1);
+
+    for (int inc = 0; inc < T::size(); inc += 2) {
+        onsites(ALL) {
+            T tvec = S[0][X];
+            if (inc + 1 < T::size()) {
+                tS[X] = Complex<atype>(tvec[inc], tvec[inc + 1]);
+            } else {
+                tS[X] = Complex<atype>(tvec[inc], 0);
+            }
+        }
+        tS.FFT(fftdirs, SK[0]);
+        onsites(ALL) {
+            if (bcmsid[X] > p.l && bcmsid[X] <= p.lc) {
+                tSK[X] = SK[1][X + d] - SK[0][X + d];
+            } else {
+                tSK[X] = 0;
+            }
+        }
+        tSK.FFT(fftdirs, tS, fft_direction::back);
+        onsites(ALL) {
+            Complex<atype> tc = tS[X] / svol;
+            Sd[X][inc] = tc.real();
+            if (inc + 1 < T::size()) {
+                Sd[X][inc + 1] = tc.imag();
+            }
+        }
+    }
+
+    onsites(ALL) {
+        ds += -p.kappa * S[0][X].dot(Sd[X]);
+    }
+
+    return ds.value();
 }
 
 template <typename T, typename pT, typename atype = hila::arithmetic_type<T>>
@@ -236,7 +301,17 @@ void do_hmc_trajectory(Field<T> (&S)[2], const Field<pT> &bcmsid, Field<T> &E, c
 template <typename T, typename pT>
 void measure_stuff(const Field<T> (&S)[2], const Field<pT> &bcmsid, const Field<T> &E,
                    const parameters &p) {
-    //TODO: implement measurements here
+
+    static bool first = true;
+    if (first) {
+        // print legend for measurement output
+        hila::out0 << "LMEAS:        s            dS\n";
+        first = false;
+    }
+    auto s = measure_s(S, bcmsid, p) / lattice.volume();
+    auto ds = measure_ds_dalpha(S, bcmsid, p);
+
+    hila::out0 << string_format("MEAS % 0.6e % 0.6e\n", s, ds);
 }
 
 // end measurement functions
@@ -256,7 +331,7 @@ void measure_stuff(const Field<T> (&S)[2], const Field<pT> &bcmsid, const Field<
         std::ofstream outf;
         outf.open("run_status", std::ios::out | std::ios::trunc);
         outf << "trajectory  " << trajectory + 1 << '\n';
-        outf << "alpha       " << p.alpha << "\n";
+        //outf << "alpha       " << p.alpha << "\n";
         outf << "seed        " << static_cast<uint64_t>(hila::random() * (1UL << 61)) << '\n';
         outf << "time        " << hila::gettime() << '\n';
         // write config name to status file:
@@ -277,7 +352,7 @@ bool restore_checkpoint(Field<T> &S, int &trajectory, parameters &p) {
     if (status.open("run_status", false, false)) {
         hila::out0 << "RESTORING FROM CHECKPOINT:\n";
         trajectory = status.get("trajectory");
-        p.alpha = status.get("alpha");
+        //p.alpha = status.get("alpha");
         seed = status.get("seed");
         p.time_offset = status.get("time");
         // get config name with suffix from status file:
@@ -424,8 +499,12 @@ int main(int argc, char **argv) {
     p.lambda = par.get("lambda");
     // number of replicas
     p.s = par.get("replica number");
-    // entangling region slab width
-    p.l = par.get("momentum scale");
+    // momentum space entangling region (sphere) radius for alpha=0
+    p.l = par.get("momentum scale l");
+    // momentum space entangling region (sphere) radius for alpha=1
+    p.lc = par.get("momentum scale lc");
+    // interpolation parameter
+    p.alpha = par.get("alpha");
     p.bcms = -1;
     // number of trajectories
     p.n_traj = par.get("number of trajectories");
@@ -443,8 +522,6 @@ int main(int argc, char **argv) {
     p.config_file = par.get("config name");
 
     par.close(); // file is closed also when par goes out of scope
-
-    p.alpha = 0;
 
     if(p.s<=1) {
         hila::out0 << "Error: replica number s must be larger than 1. Current value is s=" << p.s << "\n";
