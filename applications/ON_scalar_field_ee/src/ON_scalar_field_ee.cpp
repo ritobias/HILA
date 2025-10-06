@@ -33,7 +33,7 @@ struct parameters {
 
 ///////////////////////////////////////////////////////////////////////////////////
 // HMC functions
-// action: S[\phi] = \sum_{x} ( -\kappa/2 \sum_{\nu}( \phi(x).\phi(x+\hat{\nu}) + \phi(x).\phi(x-\hat{\nu}) + \phi(x).\phi(x) + \lambda (\phi(x).\phi(x) - 1)^2 )
+// action: S[\phi] = \sum_{x} ( -\kappa/2 \sum_{\nu}( \phi(x).\phi(x+\hat{\nu}) + \phi(x).\phi(x-\hat{\nu}) ) + \phi(x).\phi(x) + \lambda (\phi(x).\phi(x) - 1)^2 )
 
 
 template <typename T, typename pT, typename atype = hila::arithmetic_type<T>>
