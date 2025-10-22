@@ -244,12 +244,12 @@ class Matrix_t {
      * @return constexpr int
      */
     // size for row vector
-    template <int q = n, int p = m, std::enable_if_t<q == 1, int> = 0>
+    template <int q = n, int p = m, std::enable_if_t<(q == 1 && p > 1), int> = 0>
     static constexpr int size() {
         return p;
     }
     // size for column vector
-    template <int q = n, int p = m, std::enable_if_t<p == 1, int> = 0>
+    template <int q = n, int p = m, std::enable_if_t<(p == 1 && q > 1), int> = 0>
     static constexpr int size() {
         return q;
     }
@@ -258,6 +258,7 @@ class Matrix_t {
     static constexpr int size() {
         return q;
     }
+
 
     /**
      * @brief Standard array indexing operation for matrices and vectors
