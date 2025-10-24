@@ -631,22 +631,25 @@ int main(int argc, char **argv) {
         act_new = measure_action(S, bcmsid, E, p, s_new);
 
         bool accept = hila::broadcast(hila::random() < exp(act_old - act_new));
-
-        hila::out0 << std::setprecision(12) << "HMC " << trajectory << " S_TOT_start " << act_old
+        if(trajectory<0 || !accept) {
+            hila::out0 << std::setprecision(12) << "HMC " << trajectory << " S_TOT_start " << act_old
                    << " dS_TOT " << std::setprecision(6) << act_new - act_old
                    << std::setprecision(12);
+            if (accept) {
+                hila::out0 << " ACCEPT" << " --> S " << s_new;
+            } else {
+                hila::out0 << " REJECT" << " --> S " << s_old;
+            }
+            hila::out0 << "  time " << std::setprecision(3) << hila::gettime() - ttime << '\n';
+        }
         if (accept) {
-            hila::out0 << " ACCEPT" << " --> S " << s_new;
             onsites(ALL) S_back[X] = S[0][X];
             s_old = s_new;
         } else {
-            hila::out0 << " REJECT" << " --> S " << s_old;
             onsites(ALL) S[0][X] = S_back[X];
         }
 
         update_timer.stop();
-
-        hila::out0 << "  time " << std::setprecision(3) << hila::gettime() - ttime << '\n';
 
 
         // perform measurements:
