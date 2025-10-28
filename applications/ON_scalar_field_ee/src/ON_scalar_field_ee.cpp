@@ -305,13 +305,13 @@ void measure_stuff(const Field<T> (&S)[2], const Field<pT> &bcmsid, const Field<
     static bool first = true;
     if (first) {
         // print legend for measurement output
-        hila::out0 << "LMEAS:        s            dS\n";
+        hila::out0 << "LMEAS:        s                  dS\n";
         first = false;
     }
     auto s = measure_s(S, bcmsid, p) / lattice.volume();
     auto ds = measure_ds_dalpha(S, bcmsid, p);
 
-    hila::out0 << string_format("MEAS % 0.6e % 0.6e\n", s, ds);
+    hila::out0 << string_format("MEAS % 0.6e % 0.12e\n", s, ds);
 }
 
 // end measurement functions
