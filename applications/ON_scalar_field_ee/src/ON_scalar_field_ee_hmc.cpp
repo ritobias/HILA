@@ -19,16 +19,21 @@ struct parameters {
     ftype l;            // momentum space entangling region slab width l
     ftype lc;           // momentum space entangling region slab width lc
     ftype alpha;        // interpolation parameter between l and lc
-    ftype dalpha;
     ftype bcms;
     int n_traj;         // number of trajectories to generate
+    int trajlen;        // HMC integration trajectory length
+    ftype dt;           // HMC integration time step
     int n_therm;        // number of thermalization trajectories (counts only accepted traj.)
-    int n_heatbath;     // number of heat-bath sweeps per "trajectory"
-    int n_interp_steps; // number of interpolation steps to change alpha from 0 to 1
+    int n_update;       // number of heat-bath sweeps per "trajectory"
+    int n_overrelax;    // number of overrelaxation sweeps per "trajectory"
     int n_save;         // number of trajectories between config. check point
     std::string config_file;
     ftype time_offset;
 };
+
+///////////////////////////////////////////////////////////////////////////////////
+// HMC functions
+// action: S[\phi] = \sum_{x} ( -\kappa/2 \sum_{\nu}( \phi(x).\phi(x+\hat{\nu}) + \phi(x).\phi(x-\hat{\nu}) ) + \phi(x).\phi(x) + \lambda (\phi(x).\phi(x) - 1)^2 )
 
 
 template <typename T, typename pT, typename atype = hila::arithmetic_type<T>>
@@ -39,7 +44,7 @@ void move_filtered_p(const Field<T> (&S)[2], const Field<pT> &bcmsid, const Dire
         S[1].start_gather(-d);
         S[0].start_gather(-d);
     }
-    onsites(ALL) {
+    onsites(par) {
         if (bcmsid[X] <= p.bcms) {
             Sd[X] = S[1][X + d];
         } else {
@@ -47,7 +52,7 @@ void move_filtered_p(const Field<T> (&S)[2], const Field<pT> &bcmsid, const Dire
         }
     }
     if (both_dirs) {
-        onsites(ALL) {
+        onsites(par) {
             if (bcmsid[X] <= p.bcms) {
                 Sd[X] += S[1][X - d];
             } else {
@@ -213,19 +218,90 @@ double measure_ds_dalpha(const Field<T> (&S)[2], const Field<pT> &bcmsid, const 
     return ds.value();
 }
 
-///////////////////////////////////////////////////////////////////////////////////
-// O(N) action
-// action: S[\phi] = \sum_{x} ( -\kappa/2 \sum_{\nu}( \phi(x).\phi(x+\hat{\nu}) +
-// \phi(x).\phi(x-\hat{\nu}) ) + \phi(x).\phi(x) + \lambda (\phi(x).\phi(x) - 1)^2 )
-//
+template <typename T, typename pT, typename atype = hila::arithmetic_type<T>>
+void get_force_add(const Field<T> (&S)[2], const Field<pT> &bcmsid, Field<T> &K, atype eps,
+                     const parameters &p) {
+    // compute the force F^a_x = -\delta^{a b}\frac{\delta S}{\delta\phi_x^b}
+    Field<T> Sd;
+    // force from hopping terms in all directions:
+    atype th = eps * p.kappa;
+    foralldir(d) {
+        if (d < NDIM - 1) {
+            S[0].start_gather(-d);
+            onsites(ALL) K[X] += th * S[0][X + d];
+
+            onsites(ALL) K[X] += th * S[0][X - d];
+        } else {
+            move_filtered(S, bcmsid, d, true, Sd, p);
+            onsites(ALL) K[X] += th * Sd[X];
+        }
+    }
+    // force from potential term:
+    onsites(ALL) {
+        atype S2 = S[0][X].squarenorm();
+        K[X] += -eps * (2.0 + 4.0 * p.lambda * (S2 - 1.0)) * S[0][X];
+    }
+}
+
+template <typename T, typename atype = hila::arithmetic_type<T>>
+double measure_e2(const Field<T> &E) {
+    // compute "kinetic energy" from canonical momenta
+    Reduction<double> e2 = 0;
+    e2.allreduce(false).delayed(true);
+    onsites(ALL) e2 += E[X].squarenorm();
+    return e2.value();
+}
+
+template <typename T, typename atype = hila::arithmetic_type<T>>
+void update_S(Field<T> &S, const Field<T> &E, atype delta) {
+    // evolve scalar field with canonical momenta
+    onsites(ALL) {
+        S[X] += delta * E[X];
+    }
+}
+
+template <typename T, typename pT, typename atype = hila::arithmetic_type<T>>
+void update_E(const Field<T>(&S)[2], const Field<pT> &bcmsid, Field<T> &E, atype delta, const parameters &p) {
+    // evolve canonical momenta with force
+    get_force_add(S, bcmsid, E, delta, p);
+
+}
+
+template <typename T, typename pT, typename atype = hila::arithmetic_type<T>>
+double measure_action(const Field<T> (&S)[2], const Field<pT> &bcmsid,const Field<T> &E, const parameters &p, atype &s) {
+    // measure the "total action", consisting of action and "kinetic energy" term
+    s = measure_s(S, bcmsid, p);
+    double e2 = measure_e2(E);
+    return s + e2 / 2;
+}
+
+
+template <typename T, typename pT>
+void do_hmc_trajectory(Field<T> (&S)[2], const Field<pT> &bcmsid, Field<T> &E, const parameters &p) {
+    // leap frog integration
+
+    // start trajectory: advance U by half a time step
+    update_S(S[0], E, p.dt / 2);
+    // main trajectory integration:
+    for (int n = 0; n < p.trajlen - 1; ++n) {
+        update_E(S, bcmsid, E, p.dt, p);
+        update_S(S[0], E, p.dt);
+    }
+    // end trajectory: bring U and E to the same time
+    update_E(S, bcmsid, E, p.dt, p);
+    update_S(S[0], E, p.dt / 2);
+
+}
+
+
+// HMC functions
 ///////////////////////////////////////////////////////////////////////////////////
 // heat-bath functions
 
-template <typename T, typename atype = hila::arithmetic_type<T>>
+template <typename T, typename pT, typename atype = hila::arithmetic_type<T>>
 void ON_heatbath(T &S, const T &nnsum, atype kappa, atype lambda) {
     T gv = 0;
-    atype vari = 1.0 / sqrt(2.0);
-    gv.gaussian_random(vari);
+    gv.gaussian_random();
     gv += 0.5 * kappa * nnsum;
     atype rgvsq = gv.squarenorm() - 1.0;
     atype rgv0sq = S.squarenorm() - 1.0;
@@ -249,21 +325,22 @@ void ON_heatbath(T &S, const T &nnsum, atype kappa, atype lambda) {
  * @param tpar temporal parity
  */
 template <typename T, typename pT, typename atype = hila::arithmetic_type<T>>
-void hb_update_parity(Field<T>(&S)[2], const Field<pT> &bcmsid, const parameters &p, Parity par, int tpar) {
+void hb_update_parity(const Field<T>(&S)[2], const Field<pT> &bcmsid, const parameters &p, Parity par, int tpar) {
 
     static hila::timer hb_timer("Heatbath");
 
     Field<T> Sd, nnsum = 0.0;
 
+    atype th = p.kappa;
     foralldir(d) {
         if (d < NDIM - 1) {
             S[0].start_gather(-d);
-            onsites(par) nnsum[X] += S[0][X + d];
+            onsites(par) nnsum[X] += th * S[0][X + d];
 
-            onsites(par) nnsum[X] += S[0][X - d];
+            onsites(par) nnsum[X] += th * S[0][X - d];
         } else {
             move_filtered(S, bcmsid, d, true, Sd, p);
-            onsites(par) nnsum[X] += Sd[X];
+            onsites(par) nnsum[X] += th * Sd[X];
         }
     }
 
@@ -274,7 +351,6 @@ void hb_update_parity(Field<T>(&S)[2], const Field<pT> &bcmsid, const parameters
             ON_heatbath(S[0][X], nnsum[X], p.kappa, p.lambda);
         }
     }
-
     hb_timer.stop();
 }
 
@@ -289,7 +365,7 @@ void hb_update_parity(Field<T>(&S)[2], const Field<pT> &bcmsid, const parameters
  * @param p parameters
  */
 template <typename T, typename pT, typename atype = hila::arithmetic_type<T>>
-void hb_update(Field<T> (&S)[2], const Field<pT> &bcmsid, const parameters &p) {
+void hb_update(const Field<T> (&S)[2], const Field<pT> &bcmsid, const parameters &p) {
     std::array<int, 4> rnarr;
     for (int i = 0; i < 4; ++i) {
         // randomly choose a spatial and a time slice parity:
@@ -320,8 +396,8 @@ void hb_update(Field<T> (&S)[2], const Field<pT> &bcmsid, const parameters &p) {
  * @param p parameters
  */
 template <typename T, typename pT>
-void do_hb_trajectory(Field<T> (&S)[2], const Field<pT> &bcmsid, const parameters &p) {
-    for (int n = 0; n < p.n_heatbath; n++) {
+void do_hb_trajectory(const Field<T> (&S)[2], const Field<pT> &bcmsid, const parameters &p) {
+    for (int n = 0; n < p.n_heatbath + p.n_overrelax; n++) {
         hb_update(S, bcmsid, p);
     }
 }
@@ -331,88 +407,9 @@ void do_hb_trajectory(Field<T> (&S)[2], const Field<pT> &bcmsid, const parameter
 ///////////////////////////////////////////////////////////////////////////////////
 // measurement functions
 
-template <typename T, typename pT, typename atype = hila::arithmetic_type<T>>
-void do_interp_hb_trajectory(Field<T> (&S)[2], const Field<pT> &bcmsid, parameters &p,
-                             int interp_dir, out_only atype &ds) {
-
-
-    static hila::timer hbbc_timer("HBBC (update)");
-    hbbc_timer.start();
-
-    atype dalpha = p.dalpha / p.n_interp_steps; // step size of interpolating parameter
-    atype alpha0 = p.alpha;
-    if (interp_dir == 0) {
-        dalpha = 0;
-    } else if (interp_dir < 0) {
-        dalpha = -dalpha;
-    }
-
-    ds = 0;
-    for (int n = 1; n < p.n_interp_steps; ++n) {
-        ds += measure_ds_dalpha(S, bcmsid, p); // work done during n-th interpolation step
-        p.alpha = alpha0 + n * dalpha;
-
-        hb_update(S, bcmsid, p);
-
-    }
-    ds += measure_ds_dalpha(S, bcmsid, p); // work done during last interpolation step
-
-
-    ds *= dalpha;
-
-    hbbc_timer.stop();
-}
-
-template <typename T, typename pT, typename atype = hila::arithmetic_type<T>>
-void do_hbbc_measure(Field<T> (&S)[2], const Field<pT> &bcmsid, parameters &p) {
-
-    auto alpha = p.alpha;
-
-    atype ds = 0;
-    Field<T> S_old = S[0];
-
-    static bool first = true;
-    if (first) {
-        // print legend for measurement output
-        hila::out0 << "LHBBC:         DIR              dS_EXT          TIME\n";
-        first = false;
-    }
-
-    ftype ttime = hila::gettime();
-    ftype tttime;
-
-    int ipdir;
-    if (p.alpha == 0) {
-        ipdir = 1;
-        do_interp_hb_trajectory(S, bcmsid, p, ipdir, ds);
-    } else if (p.alpha == 1) {
-        ipdir = -1;
-        do_interp_hb_trajectory(S, bcmsid, p, ipdir, ds);
-    } else {
-        p.alpha = 0.5;
-        ipdir = 1;
-        do_interp_hb_trajectory(S, bcmsid, p, ipdir, ds);
-        tttime = hila::gettime();
-        hila::out0 << string_format("HBBC            % 1d % 0.12e    % 10.5f\n", ipdir, ds,
-                                    tttime - ttime);
-        ttime = tttime;
-        ds = 0;
-        S[0] = S_old;
-        p.alpha = 0.5;
-        ipdir = -1;
-        do_interp_hb_trajectory(S, bcmsid, p, ipdir, ds);
-    }
-
-    hila::out0 << string_format("HBBC            % 1d % 0.12e    % 10.5f\n", ipdir, ds,
-                                hila::gettime() - ttime);
-
-
-    S[0] = S_old;
-    p.alpha = alpha;
-}
-
 template <typename T, typename pT>
-void measure_stuff(const Field<T> (&S)[2], const Field<pT> &bcmsid, const parameters &p) {
+void measure_stuff(const Field<T> (&S)[2], const Field<pT> &bcmsid, const Field<T> &E,
+                   const parameters &p) {
 
     static bool first = true;
     if (first) {
@@ -617,17 +614,15 @@ int main(int argc, char **argv) {
     p.lc = par.get("momentum scale lc");
     // interpolation parameter
     p.alpha = par.get("alpha");
-    // interpolation parameter
-    p.dalpha = par.get("dalpha");
     p.bcms = -1;
     // number of trajectories
     p.n_traj = par.get("number of trajectories");
-    // number of heat-bath (HB) sweeps per trajectory
-    p.n_heatbath = par.get("heatbath updates");
+    // hmc trajectory length
+    p.trajlen = par.get("hmc trajlen");
+    // hmc trajectory step width
+    p.dt = par.get("hmc step width");
     // number of thermalization trajectories
     p.n_therm = par.get("thermalization trajs");
-    // number of alpha-interpolation steps
-    p.n_interp_steps = par.get("interpolation steps");
     // random seed = 0 -> get seed from time
     long seed = par.get("random seed");
     // save config and checkpoint
@@ -687,34 +682,111 @@ int main(int argc, char **argv) {
 
     double act_old, act_new, s_old, s_new;
 
+    // variables for controlling HMC step size during thermalization:
+    auto orig_dt = p.dt;
+    auto orig_trajlen = p.trajlen;
+    int nreject = 0;
+    ftype t_step0 = 0.0;
+
+    s_old = measure_s(S, bcmsid, p);
+    onsites(ALL) S_back[X] = S[0][X];
+
+
+
     for (int trajectory = start_traj; trajectory <= p.n_traj; ++trajectory) {
+        if (trajectory < 0) {
+            // during thermalization: start with 10% of normal step size (and trajectory length)
+            // and increse linearly with number of accepted thermalization trajectories. normal
+            // step size is reached after 3/4*p.n_therm accepted thermalization trajectories.
+            if (trajectory - start_traj < p.n_therm * 3.0 / 4.0) {
+                p.dt = orig_dt * (0.1 + 0.9 * 4.0 / 3.0 * (trajectory - start_traj) / p.n_therm);
+                p.trajlen = orig_trajlen;
+            } else {
+                p.dt = orig_dt;
+                p.trajlen = orig_trajlen;
+            }
+            if (nreject > 1) {
+                // if two consecutive thermalization trajectories are rejected, decrese the
+                // step size by factor 0.5 (but keeping trajectory length constant, since
+                // thermalization becomes inefficient if trajectory length decreases)
+                for (int irej = 0; irej < nreject - 1; ++irej) {
+                    p.dt *= 0.5;
+                    p.trajlen *= 2;
+                }
+                hila::out0 << " thermalization step size(reduzed due to multiple reject) dt="
+                           << std::setprecision(8) << p.dt << '\n';
+            } else {
+                hila::out0 << " thermalization step size dt=" << std::setprecision(8) << p.dt
+                           << '\n';
+            }
+        } else if (trajectory == 0) {
+            p.dt = orig_dt;
+            p.trajlen = orig_trajlen;
+            hila::out0 << " normal stepsize dt=" << std::setprecision(8) << p.dt << '\n';
+        }
+
+
+        // perform HMC update:
+        update_timer.start();
 
         ftype ttime = hila::gettime();
 
-        update_timer.start();
+        onsites(ALL) E[X].gaussian_random();
 
-        do_hb_trajectory(S, bcmsid, p);
+        act_old = s_old + measure_e2(E) / 2;
 
-        // put sync here in order to get approx gpu timing
-        hila::synchronize_threads();
+        do_hmc_trajectory(S, bcmsid, E, p);
+
+        act_new = measure_action(S, bcmsid, E, p, s_new);
+
+        bool accept = hila::broadcast(hila::random() < exp(act_old - act_new));
+        if(trajectory<0 || !accept) {
+            hila::out0 << std::setprecision(12) << "HMC " << trajectory << " S_TOT_start " << act_old
+                   << " dS_TOT " << std::setprecision(6) << act_new - act_old
+                   << std::setprecision(12);
+            if (accept) {
+                hila::out0 << " ACCEPT" << " --> S " << s_new;
+            } else {
+                hila::out0 << " REJECT" << " --> S " << s_old;
+            }
+            hila::out0 << "  time " << std::setprecision(3) << hila::gettime() - ttime << '\n';
+        }
+        if (accept) {
+            onsites(ALL) S_back[X] = S[0][X];
+            s_old = s_new;
+        } else {
+            onsites(ALL) S[0][X] = S_back[X];
+        }
+
         update_timer.stop();
 
+
+        // perform measurements:
         measure_timer.start();
 
         hila::out0 << "Measure_start " << trajectory << '\n';
 
-        measure_stuff(S, bcmsid, p);
-
-        if (trajectory >= 0 && p.n_interp_steps > 0) {
-            do_hbbc_measure(S, bcmsid, p);
-        }
+        measure_stuff(S, bcmsid, E, p);
 
         hila::out0 << "Measure_end " << trajectory << '\n';
 
         measure_timer.stop();
 
-        if (p.n_save > 0 && (trajectory + 1) % p.n_save == 0) {
+        // create checkpoint (when it's time):
+        if (p.n_save > 0 && abs(trajectory + 1) % p.n_save == 0) {
             checkpoint(S[0], trajectory, p);
+        }
+
+        if (trajectory < 0) {
+            // during thermalization: keep track of number of rejected trajectories
+            if (!accept) {
+                ++nreject;
+                --trajectory; // repeat trajectories that were rejected during thermalization
+            } else {
+                if (nreject > 0) {
+                    --nreject;
+                }
+            }
         }
     }
 
