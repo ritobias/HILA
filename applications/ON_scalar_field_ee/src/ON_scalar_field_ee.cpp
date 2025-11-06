@@ -223,15 +223,15 @@ double measure_ds_dalpha(const Field<T> (&S)[2], const Field<pT> &bcmsid, const 
 
 template <typename T, typename atype = hila::arithmetic_type<T>>
 void ON_heatbath(T &S, const T &nnsum, atype kappa, atype lambda) {
-    T gv = 0;
+    T Sn = 0;
     atype vari = 1.0 / sqrt(2.0);
-    gv.gaussian_random(vari);
-    gv += 0.5 * kappa * nnsum;
-    atype rgvsq = gv.squarenorm() - 1.0;
-    atype rgv0sq = S.squarenorm() - 1.0;
-    atype texp = lambda * (rgvsq * rgvsq - rgv0sq * rgv0sq);
-    if (texp<=0 || hila::random() < exp(texp)) {
-        S = gv;
+    Sn.gaussian_random(vari);
+    Sn += 0.5 * kappa * nnsum;
+    atype rSnsq = Sn.squarenorm() - 1.0;
+    atype rSsq = S.squarenorm() - 1.0;
+    atype texp = lambda * (rSnsq * rSnsq - rSsq * rSsq);
+    if (texp<=0 || hila::random() < exp(-texp)) {
+        S = Sn;
     }
 }
 

@@ -44,7 +44,7 @@ void move_filtered_p(const Field<T> (&S)[2], const Field<pT> &bcmsid, const Dire
         S[1].start_gather(-d);
         S[0].start_gather(-d);
     }
-    onsites(par) {
+    onsites(ALL) {
         if (bcmsid[X] <= p.bcms) {
             Sd[X] = S[1][X + d];
         } else {
@@ -52,7 +52,7 @@ void move_filtered_p(const Field<T> (&S)[2], const Field<pT> &bcmsid, const Dire
         }
     }
     if (both_dirs) {
-        onsites(par) {
+        onsites(ALL) {
             if (bcmsid[X] <= p.bcms) {
                 Sd[X] += S[1][X - d];
             } else {
@@ -295,115 +295,6 @@ void do_hmc_trajectory(Field<T> (&S)[2], const Field<pT> &bcmsid, Field<T> &E, c
 
 
 // HMC functions
-///////////////////////////////////////////////////////////////////////////////////
-// heat-bath functions
-
-template <typename T, typename pT, typename atype = hila::arithmetic_type<T>>
-void ON_heatbath(T &S, const T &nnsum, atype kappa, atype lambda) {
-    T gv = 0;
-    gv.gaussian_random();
-    gv += 0.5 * kappa * nnsum;
-    atype rgvsq = gv.squarenorm() - 1.0;
-    atype rgv0sq = S.squarenorm() - 1.0;
-    atype texp = lambda * (rgvsq * rgvsq - rgv0sq * rgv0sq);
-    if (texp<=0 || hila::random() < exp(texp)) {
-        S = gv;
-    }
-}
-
-
-/**
- * @brief Wrapper function to updated O(N) scalar field per paraity
- * @details --
- *
- * @tparam T field type
- * @tparam pT type of bcmsid
- * @param S[2] field for the two different nn-topologies
- * @param bcmsid field specifying nn-topology to be used to compute nn terms
- * @param p parameters
- * @param par Parity specifies parity of links to be updated
- * @param tpar temporal parity
- */
-template <typename T, typename pT, typename atype = hila::arithmetic_type<T>>
-void hb_update_parity(const Field<T>(&S)[2], const Field<pT> &bcmsid, const parameters &p, Parity par, int tpar) {
-
-    static hila::timer hb_timer("Heatbath");
-
-    Field<T> Sd, nnsum = 0.0;
-
-    atype th = p.kappa;
-    foralldir(d) {
-        if (d < NDIM - 1) {
-            S[0].start_gather(-d);
-            onsites(par) nnsum[X] += th * S[0][X + d];
-
-            onsites(par) nnsum[X] += th * S[0][X - d];
-        } else {
-            move_filtered(S, bcmsid, d, true, Sd, p);
-            onsites(par) nnsum[X] += th * Sd[X];
-        }
-    }
-
-    hb_timer.start();
-    Direction td = Direction(NDIM - 1);
-    onsites(par) {
-        if(X.coordinate(td) % 2 == tpar) {
-            ON_heatbath(S[0][X], nnsum[X], p.kappa, p.lambda);
-        }
-    }
-    hb_timer.stop();
-}
-
-/**
- * @brief Wrapper update function
- * @details field update sweep with randomly chosen spatial and temporal parities 
- *
- * @tparam T field type
- * @tparam pT type of bcmsid
- * @param S[2] field for the two different nn-topologies
- * @param bcmsid field specifying nn-topology to be used to compute nn terms
- * @param p parameters
- */
-template <typename T, typename pT, typename atype = hila::arithmetic_type<T>>
-void hb_update(const Field<T> (&S)[2], const Field<pT> &bcmsid, const parameters &p) {
-    std::array<int, 4> rnarr;
-    for (int i = 0; i < 4; ++i) {
-        // randomly choose a spatial and a time slice parity:
-        rnarr[i] = (int)(hila::random() * 4);
-    }
-    hila::broadcast(rnarr);
-
-    for (int i = 0; i < 4; ++i) {
-        int tdp = rnarr[i];
-
-        int ttpar = tdp / 2;
-        int tspar = 1 + (tdp % 2);
-
-        // perform the selected updates:
-        hb_update_parity(S, bcmsid, p, Parity(tspar), ttpar);
-    }
-}
-
-/**
- * @brief Evolve field
- * @details Evolution happens by means of a metropolis corrected heatbath algorithm. We do on average
- * p.n_heatbath heatbath updates on each site per sweep.
- *
- * @tparam T field type
- * @tparam pT type of plaq_tbc_mode
- * @param S[2] Field for the two different nn-topologies
- * @param bcmsid Field specifying nn-topology to be used to compute nn terms
- * @param p parameters
- */
-template <typename T, typename pT>
-void do_hb_trajectory(const Field<T> (&S)[2], const Field<pT> &bcmsid, const parameters &p) {
-    for (int n = 0; n < p.n_heatbath + p.n_overrelax; n++) {
-        hb_update(S, bcmsid, p);
-    }
-}
-
-
-// heat-bath functions
 ///////////////////////////////////////////////////////////////////////////////////
 // measurement functions
 
