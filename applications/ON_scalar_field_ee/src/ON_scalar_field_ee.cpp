@@ -253,7 +253,7 @@ void hb_update_parity(Field<T>(&S)[2], const Field<pT> &bcmsid, const parameters
 
     static hila::timer hb_timer("Heatbath");
 
-    Field<T> Sd, nnsum = 0.0;
+    Field<T> Sd, nnsum = 0;
 
     foralldir(d) {
         if (d < NDIM - 1) {
