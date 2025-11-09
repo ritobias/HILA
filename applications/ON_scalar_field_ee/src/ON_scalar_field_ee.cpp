@@ -66,14 +66,14 @@ void move_filtered_k(const Field<T> (&S)[2], const Field<pT> &bcmsid, const Dire
 
     // define direction in which Fourier transform should be taken
     CoordinateVector fftdirs;
-    foralldir(d) if(d < NDIM - 1) fftdirs[d] = 1;
-    fftdirs[NDIM - 1] = 0;
+    foralldir(td) if(td != d) fftdirs[td] = 1;
+    fftdirs[d] = 0;
 
     Field<Complex<atype>> tS, tSK;
     Field<Complex<atype>> SK[2];
     SK[0] = 0;
     SK[1].make_ref_to(SK[0], 1);
-    double svol = lattice.volume() / lattice.size(NDIM - 1);
+    double svol = lattice.volume() / lattice.size(d);
     Sd = 0;
     for (int inc = 0; inc < T::size(); inc += 2) {
         onsites(ALL) {
