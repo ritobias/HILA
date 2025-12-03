@@ -8,13 +8,14 @@
 #endif
 
 using ftype = double;
-using myfield = Vector<NCOLOR, ftype>;
+using fT = Vector<NCOLOR, ftype>;
 
 // define a struct to hold the input parameters: this
 // makes it simpler to pass the values around
 struct parameters {
     ftype kappa;        // hopping parameter
-    ftype lambda;       // phi^4 coupling (lattice definition)
+    ftype lambda;       // quartic coupling (lattice definition)
+    fT source;          // source terms
     int s;              // number of replicas
     ftype l;            // momentum space entangling region slab width l
     ftype lc;           // momentum space entangling region slab width lc
@@ -24,6 +25,7 @@ struct parameters {
     int n_traj;         // number of trajectories to generate
     int n_therm;        // number of thermalization trajectories (counts only accepted traj.)
     int n_heatbath;     // number of heat-bath sweeps per "trajectory"
+    int n_multhits;     // number of corrected heat-bath hits per update
     int n_interp_steps; // number of interpolation steps to change alpha from 0 to 1
     int n_save;         // number of trajectories between config. check point
     std::string config_file;
@@ -32,14 +34,15 @@ struct parameters {
 
 
 template <typename T, typename pT, typename atype = hila::arithmetic_type<T>>
-void move_filtered_p(const Field<T> (&S)[2], const Field<pT> &bcmsid, const Direction &d, bool both_dirs, out_only Field<T> &Sd, const parameters &p) {
+void move_filtered_p(const Field<T> (&S)[2], const Field<pT> &bcmsid, const Direction &d, const Parity &par,
+                     bool both_dirs, out_only Field<T> &Sd, const parameters &p) {
     // pull fields from neighboring sites in d-direction, using different nn-topologies depending on local value of field bcmsid[X]
     // (was used only for testing)
     if (both_dirs) {
-        S[1].start_gather(-d);
-        S[0].start_gather(-d);
+        S[1].start_gather(-d, par);
+        S[0].start_gather(-d, par);
     }
-    onsites(ALL) {
+    onsites(par) {
         if (bcmsid[X] <= p.bcms) {
             Sd[X] = S[1][X + d];
         } else {
@@ -47,7 +50,7 @@ void move_filtered_p(const Field<T> (&S)[2], const Field<pT> &bcmsid, const Dire
         }
     }
     if (both_dirs) {
-        onsites(ALL) {
+        onsites(par) {
             if (bcmsid[X] <= p.bcms) {
                 Sd[X] += S[1][X - d];
             } else {
@@ -58,7 +61,7 @@ void move_filtered_p(const Field<T> (&S)[2], const Field<pT> &bcmsid, const Dire
 }
 
 template <typename T, typename pT, typename atype = hila::arithmetic_type<T>>
-void move_filtered_k(const Field<T> (&S)[2], const Field<pT> &bcmsid, const Direction &d, bool both_dirs,
+void move_filtered_k(const Field<T> (&S)[2], const Field<pT> &bcmsid, const Direction &d, const Parity &par, bool both_dirs,
                    out_only Field<T> &Sd, const parameters &p) {
     // pull fields from neighboring sites in d-direction, using different nn-topologies for
     // different Fourier modes, depending on the magnitude |k_s| of their spatial k-vector k_s,
@@ -114,7 +117,8 @@ void move_filtered_k(const Field<T> (&S)[2], const Field<pT> &bcmsid, const Dire
             }
         }
         tSK.FFT(fftdirs, tS, fft_direction::back);
-        onsites(ALL) {
+
+        onsites(par) {
             Complex<atype> tc = tS[X] / svol;
             Sd[X][inc] = tc.real();
             if (inc + 1 < T::size()) {
@@ -125,92 +129,21 @@ void move_filtered_k(const Field<T> (&S)[2], const Field<pT> &bcmsid, const Dire
 }
 
 template <typename T, typename pT, typename atype = hila::arithmetic_type<T>>
-void move_filtered(const Field<T> (&S)[2], const Field<pT> &bcmsid, const Direction &d, bool both_dirs,
-                     out_only Field<T> &Sd, const parameters &p) {
+void move_filtered(const Field<T> (&S)[2], const Field<pT> &bcmsid, const Direction &d,
+                   const Parity &par, bool both_dirs, out_only Field<T> &Sd, const parameters &p) {
+    if (p.s > 1) {
+        move_filtered_k(S, bcmsid, d, par, both_dirs, Sd, p);
+    } else {
+        if (both_dirs) {
+            S[0].start_gather(-d, par);
+        }
 
-    move_filtered_k(S, bcmsid, d, both_dirs, Sd, p);
-}
+        onsites(par) Sd[X] = S[0][X + d];
 
-template <typename T, typename pT, typename atype = hila::arithmetic_type<T>>
-double measure_s(const Field<T>(&S)[2], const Field<pT> &bcmsid, const parameters &p) {
-    Reduction<double> s = 0;
-    s.allreduce(false).delayed(true);
-    Field<T> Sd;
-    // hopping terms in all directions:
-    foralldir(d) {
-        if(d < NDIM - 1) {
-            onsites(ALL) {
-                s += -p.kappa * S[0][X].dot(S[0][X + d]);
-            }
-        } else {
-            move_filtered(S, bcmsid, d, false, Sd, p);
-            onsites(ALL) {
-                s += -p.kappa * S[0][X].dot(Sd[X]);
-            }
+        if (both_dirs) {
+            onsites(par) Sd[X] += S[0][X - d];
         }
     }
-    // potential term:
-    onsites(ALL) {
-        atype S2 = S[0][X].squarenorm();
-        s += S2 + p.lambda * (S2 - 1.0) * (S2 - 1.0);
-    }
-
-    return s.value();
-}
-
-template <typename T, typename pT, typename atype = hila::arithmetic_type<T>>
-double measure_ds_dalpha(const Field<T> (&S)[2], const Field<pT> &bcmsid, const parameters &p) {
-    // define direction in which Fourier transform should be taken
-    CoordinateVector fftdirs;
-    foralldir(d) if (d < NDIM - 1) fftdirs[d] = 1;
-    fftdirs[NDIM - 1] = 0;
-
-    Reduction<double> ds = 0;
-    ds.allreduce(false).delayed(true);
-    Field<T> Sd;
-
-    Field<Complex<atype>> tS, tSK;
-    Field<Complex<atype>> SK[2];
-    SK[0] = 0;
-    SK[1].make_ref_to(SK[0], 1);
-    double svol = lattice.volume() / lattice.size(NDIM - 1);
-    Sd = 0;
-
-    // hopping terms in direction d
-    Direction d = Direction(NDIM - 1);
-
-    for (int inc = 0; inc < T::size(); inc += 2) {
-        onsites(ALL) {
-            T tvec = S[0][X];
-            if (inc + 1 < T::size()) {
-                tS[X] = Complex<atype>(tvec[inc], tvec[inc + 1]);
-            } else {
-                tS[X] = Complex<atype>(tvec[inc], 0);
-            }
-        }
-        tS.FFT(fftdirs, SK[0]);
-        onsites(ALL) {
-            if (bcmsid[X] > p.l && bcmsid[X] <= p.lc) {
-                tSK[X] = SK[1][X + d] - SK[0][X + d];
-            } else {
-                tSK[X] = 0;
-            }
-        }
-        tSK.FFT(fftdirs, tS, fft_direction::back);
-        onsites(ALL) {
-            Complex<atype> tc = tS[X] / svol;
-            Sd[X][inc] = tc.real();
-            if (inc + 1 < T::size()) {
-                Sd[X][inc + 1] = tc.imag();
-            }
-        }
-    }
-
-    onsites(ALL) {
-        ds += -p.kappa * S[0][X].dot(Sd[X]);
-    }
-
-    return ds.value();
 }
 
 ///////////////////////////////////////////////////////////////////////////////////
@@ -222,11 +155,11 @@ double measure_ds_dalpha(const Field<T> (&S)[2], const Field<pT> &bcmsid, const 
 // heat-bath functions
 
 template <typename T, typename atype = hila::arithmetic_type<T>>
-void ON_heatbath(T &S, const T &nnsum, atype kappa, atype lambda) {
+void ON_heatbath(T &S, const T &nnsum, atype kappa, atype lambda, const T &source) {
     T Sn = 0;
     atype vari = 1.0 / sqrt(2.0);
     Sn.gaussian_random(vari);
-    Sn += 0.5 * kappa * nnsum;
+    Sn += 0.5 * (kappa * nnsum + source);
     atype rSnsq = Sn.squarenorm() - 1.0;
     atype rSsq = S.squarenorm() - 1.0;
     atype texp = lambda * (rSnsq * rSnsq - rSsq * rSsq);
@@ -262,7 +195,7 @@ void hb_update_parity(Field<T>(&S)[2], const Field<pT> &bcmsid, const parameters
 
             onsites(par) nnsum[X] += S[0][X - d];
         } else {
-            move_filtered(S, bcmsid, d, true, Sd, p);
+            move_filtered(S, bcmsid, d, par, true, Sd, p);
             onsites(par) nnsum[X] += Sd[X];
         }
     }
@@ -271,7 +204,9 @@ void hb_update_parity(Field<T>(&S)[2], const Field<pT> &bcmsid, const parameters
     Direction td = Direction(NDIM - 1);
     onsites(par) {
         if(X.coordinate(td) % 2 == tpar) {
-            ON_heatbath(S[0][X], nnsum[X], p.kappa, p.lambda);
+            for (int i = 0; i < p.n_multhits; ++i) {
+                ON_heatbath(S[0][X], nnsum[X], p.kappa, p.lambda, p.source);
+            }
         }
     }
 
@@ -330,6 +265,88 @@ void do_hb_trajectory(Field<T> (&S)[2], const Field<pT> &bcmsid, const parameter
 // heat-bath functions
 ///////////////////////////////////////////////////////////////////////////////////
 // measurement functions
+
+template <typename T, typename pT, typename atype = hila::arithmetic_type<T>>
+double measure_s(const Field<T> (&S)[2], const Field<pT> &bcmsid, const parameters &p, double &s_kin) {
+    Reduction<double> s = 0, s_pot = 0;
+    s.allreduce(false).delayed(true);
+    Field<T> Sd;
+    // hopping terms in all directions:
+    foralldir(d) {
+        if (d < NDIM - 1) {
+            onsites(ALL) {
+                s += -p.kappa * S[0][X].dot(S[0][X + d]);
+            }
+        } else {
+            move_filtered(S, bcmsid, d, ALL, false, Sd, p);
+            onsites(ALL) {
+                s += -p.kappa * S[0][X].dot(Sd[X]);
+            }
+        }
+    }
+    // potential term:
+    onsites(ALL) {
+        atype S2 = S[0][X].squarenorm();
+        s_pot += S2 + p.lambda * (S2 - 1.0) * (S2 - 1.0) - S[0][X].dot(p.source);
+    }
+    s_kin = s.value();
+    return s_kin + s_pot.value();
+}
+
+template <typename T, typename pT, typename atype = hila::arithmetic_type<T>>
+double measure_ds_dalpha(const Field<T> (&S)[2], const Field<pT> &bcmsid, const parameters &p) {
+    // define direction in which Fourier transform should be taken
+    CoordinateVector fftdirs;
+    foralldir(d) if (d < NDIM - 1) fftdirs[d] = 1;
+    fftdirs[NDIM - 1] = 0;
+
+    Reduction<double> ds = 0;
+    ds.allreduce(false).delayed(true);
+    Field<T> Sd;
+
+    Field<Complex<atype>> tS, tSK;
+    Field<Complex<atype>> SK[2];
+    SK[0] = 0;
+    SK[1].make_ref_to(SK[0], 1);
+    double svol = lattice.volume() / lattice.size(NDIM - 1);
+    Sd = 0;
+
+    // hopping terms in direction d
+    Direction d = Direction(NDIM - 1);
+
+    for (int inc = 0; inc < T::size(); inc += 2) {
+        onsites(ALL) {
+            T tvec = S[0][X];
+            if (inc + 1 < T::size()) {
+                tS[X] = Complex<atype>(tvec[inc], tvec[inc + 1]);
+            } else {
+                tS[X] = Complex<atype>(tvec[inc], 0);
+            }
+        }
+        tS.FFT(fftdirs, SK[0]);
+        onsites(ALL) {
+            if (bcmsid[X] > p.l && bcmsid[X] <= p.lc) {
+                tSK[X] = SK[1][X + d] - SK[0][X + d];
+            } else {
+                tSK[X] = 0;
+            }
+        }
+        tSK.FFT(fftdirs, tS, fft_direction::back);
+        onsites(ALL) {
+            Complex<atype> tc = tS[X] / svol;
+            Sd[X][inc] = tc.real();
+            if (inc + 1 < T::size()) {
+                Sd[X][inc + 1] = tc.imag();
+            }
+        }
+    }
+
+    onsites(ALL) {
+        ds += -p.kappa * S[0][X].dot(Sd[X]);
+    }
+
+    return ds.value();
+}
 
 template <typename T, typename pT, typename atype = hila::arithmetic_type<T>>
 void do_interp_hb_trajectory(Field<T> (&S)[2], const Field<pT> &bcmsid, parameters &p,
@@ -417,13 +434,28 @@ void measure_stuff(const Field<T> (&S)[2], const Field<pT> &bcmsid, const parame
     static bool first = true;
     if (first) {
         // print legend for measurement output
-        hila::out0 << "LMEAS:           s                  dS\n";
+        hila::out0 << "LMEAS:         s_kin             s                  dS\n";
+        if(false) {
+            for (int i = 0; i < T::size(); ++i) {
+                hila::out0 << "LCOND "<<i<<":        cond\n";
+            }
+            for (int i = 0; i < T::size(); ++i) {
+                for (int j = 0; j < T::size(); ++j) {
+                    hila::out0 << "LCORR " << i << " " << j << ":";
+                    for (int ti = 0; ti < lattice.size(NDIM - 1) / p.s; ++ti) {
+                        hila::out0 << string_format("       t=% 3d", ti);
+                    }
+                }
+            }
+        }
         first = false;
     }
-    auto s = measure_s(S, bcmsid, p) / lattice.volume();
+    double s_kin = 0;
+    auto s = measure_s(S, bcmsid, p, s_kin) / lattice.volume();
+    s_kin /= lattice.volume();
     auto ds = measure_ds_dalpha(S, bcmsid, p);
 
-    hila::out0 << string_format("MEAS % 0.6e % 0.12e\n", s, ds);
+    hila::out0 << string_format("MEAS % 0.8e % 0.8e % 0.12e\n", s_kin, s, ds);
 }
 
 // end measurement functions
@@ -583,7 +615,7 @@ int main(int argc, char **argv) {
     // hila::initialize should be called as early as possible
     hila::initialize(argc, argv);
 
-    hila::out0 << "O(" << myfield::size() << ") scalar field simulation using HMC\n";
+    hila::out0 << "O(" << fT::size() << ") scalar field simulation using HMC\n";
 
     hila::out0 << "Using floating point epsilon: " << fp<ftype>::epsilon << "\n";
 
@@ -609,6 +641,8 @@ int main(int argc, char **argv) {
     p.kappa = par.get("kappa");
     // phi^4 potential (lattice definition)
     p.lambda = par.get("lambda");
+    // source terms
+    p.source = par.get("source terms");
     // number of replicas
     p.s = par.get("replica number");
     // momentum space entangling region (sphere) radius for alpha=0
@@ -624,6 +658,8 @@ int main(int argc, char **argv) {
     p.n_traj = par.get("number of trajectories");
     // number of heat-bath (HB) sweeps per trajectory
     p.n_heatbath = par.get("heatbath updates");
+    // number of multi-hits per HB update
+    p.n_multhits = par.get("number of hb hits");
     // number of thermalization trajectories
     p.n_therm = par.get("thermalization trajs");
     // number of alpha-interpolation steps
@@ -637,9 +673,11 @@ int main(int argc, char **argv) {
 
     par.close(); // file is closed also when par goes out of scope
 
-    if(p.s<=1) {
-        hila::out0 << "Error: replica number s must be larger than 1. Current value is s=" << p.s << "\n";
+    if(p.s<1) {
+        hila::out0 << "Error: replica number s must be non-zero. Current value is s=" << p.s << "\n";
         hila::terminate(1);
+    } else if(p.s==1) {
+        hila::out0 << "Warning: replica number is set to s=1.\n";
     }
 
     // specify nearest neighbor topologies (needs to be done before calling lattice.setup())
@@ -674,8 +712,8 @@ int main(int argc, char **argv) {
     int start_traj = -p.n_therm;
 
     // Alloc field (S) and momentum field (E)
-    Field<myfield> S[2];
-    Field<myfield> E, S_back = 0;
+    Field<fT> S[2];
+    Field<fT> E, S_back = 0;
 
     if (!restore_checkpoint(S[0], start_traj, p)) {
         S[0] = 0;
@@ -705,7 +743,7 @@ int main(int argc, char **argv) {
 
         measure_stuff(S, bcmsid, p);
 
-        if (trajectory >= 0 && p.n_interp_steps > 0) {
+        if (p.s>1 && trajectory >= 0 && p.n_interp_steps > 0) {
             do_hbbc_measure(S, bcmsid, p);
         }
 
