@@ -90,7 +90,9 @@ void lattice_struct::setup_layout() {
 
         hila::out0 << "minimizing node volume and boundary area:\n";
         bool succ = false;
+        int nsucc = 0;
         int64_t tghosts = l_volume;
+        size_t minbndry;
         int mdir = 0;
         for (int imd = 0; imd < (max_nghosts + 1) * NDIM; ++imd) {
             mdir = ghosts[imd].c[0];
@@ -119,9 +121,12 @@ void lattice_struct::setup_layout() {
                 tndiv[d] = 1;
             }
 
-            nodesiz = tNx;
-            nodes.n_divisions = tndiv;
-            size_t minbndry = block_boundary_size(tNx) + 1; // initial boundary size
+            if(nsucc == 0) {
+                nodesiz = tNx;
+                nodes.n_divisions = tndiv;
+                minbndry = block_boundary_size(tNx) + 1; // initial boundary size
+            }
+
             size_t ttV, tbndry;
             // now run through all shapes that can be formed with the side lengths listed in nlxp:
             while (true) {
@@ -160,6 +165,7 @@ void lattice_struct::setup_layout() {
                 }
             }
             if(succ) {
+                ++nsucc;
                 break;
             }
         }
