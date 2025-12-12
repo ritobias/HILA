@@ -615,7 +615,8 @@ int main(int argc, char **argv) {
     // hila::initialize should be called as early as possible
     hila::initialize(argc, argv);
 
-    hila::out0 << "O(" << fT::size() << ") scalar field simulation using HMC\n";
+    hila::out0 << "O(" << fT::size()
+               << ") scalar field simulation using metropolis corrected heat bath updates\n";
 
     hila::out0 << "Using floating point epsilon: " << fp<ftype>::epsilon << "\n";
 

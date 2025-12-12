@@ -85,6 +85,7 @@ void lattice_struct::setup_layout() {
             }
         }
 
+        // sort by total virtual volume
         std::stable_sort(ghosts.begin(), ghosts.end(),
                          [](auto i1, auto i2) { return i1.c[1] < i2.c[1]; });
 
@@ -124,7 +125,7 @@ void lattice_struct::setup_layout() {
             if(nsucc == 0) {
                 nodesiz = tNx;
                 nodes.n_divisions = tndiv;
-                minbndry = block_boundary_size(tNx) + 1; // initial boundary size
+                minbndry = block_boundary_size(tNx) + 1; // initial value bigger than any possible boundary size
             }
 
             size_t ttV, tbndry;

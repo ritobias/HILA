@@ -1,0 +1,20 @@
+# This is a parameter file for ZN_clock_model program
+
+lattice size           60,60,60
+betac                  0.375
+betap                  0.375
+source term magnitude  0
+source term direction  0
+bds direction          2
+bds shift              1
+number of trajectories 1000
+heatbath updates       100
+number of hb hits      1
+thermalization trajs   100
+random seed            0
+trajs/saved            10
+config name            config
+trajs/profile measure  2
+trajs/config dump      100
+smearing coeff         0.2
+smearing steps         10,20,40,100,400
