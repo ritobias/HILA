@@ -214,7 +214,7 @@ T proj_to_nrange(T inval) {
 
 template <typename T>
 T proj_to_nrange(T inval, T tol) {
-    while (inval >= (T)NCOLOR / 2 + tol) {
+    while (inval > (T)NCOLOR / 2 + tol) {
         inval -= (T)NCOLOR;
     }
     while (inval <= -((T)NCOLOR / 2 + tol)) {
@@ -273,7 +273,7 @@ void smear_field(Field<sT> &smS, const VectorField<T> &shift, sT smear_param, in
     int ip = 0;
     Field<sT> tsmS[2];
     onsites(ALL) {
-        tsmS[ip][X] = proj_to_nrange(smS[X] - smSmean);
+        tsmS[ip][X] = proj_to_nrange(smS[X] - smSmean, (sT)0.0);
         //tsmS[ip][X] = smS[X] - smSmean;
     }
     for (int ism = 0; ism < n_smear; ++ism) {
@@ -295,7 +295,7 @@ void smear_field(Field<sT> &smS, const VectorField<T> &shift, sT smear_param, in
         ip = 1 - ip;
     }
     onsites(ALL) {
-        smS[X] = proj_to_nrange(tsmS[ip][X] + smSmean);
+        smS[X] = proj_to_nrange(tsmS[ip][X] + smSmean, (sT)0.0);
         //smS[X] = tsmS[ip][X] + smSmean;
     }
 }
