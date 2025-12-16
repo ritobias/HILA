@@ -9,7 +9,6 @@
 
 using ftype = double;
 using fT = int;
-Complex<ftype> sp_state[NCOLOR];
 
 // define a struct to hold the input parameters: this
 // makes it simpler to pass the values around
@@ -75,6 +74,16 @@ void ZN_heatbath(int &S, const nnT &nnsum, const Vector<NCOLOR,int> &nnlist, fty
  */
 template <typename T>
 void hb_update_parity(Field<T> &S, const VectorField<T> &shift, const parameters &p, Parity par) {
+
+    static Complex<ftype> sp_state[NCOLOR];
+    static bool first = true;
+    if(first) {
+        first = false;
+        for (int i = 0; i < NCOLOR; ++i) {
+            sp_state[i] = Complex<ftype>(cos(2.0 * M_PI * (ftype)i / (ftype)NCOLOR),
+                                        sin(2.0 * M_PI * (ftype)i / (ftype)NCOLOR));
+        }
+    }
 
     Field<Complex<ftype>> nnsum = 0;
     Field<Vector<NCOLOR, int>> nnlist(0);
@@ -147,16 +156,85 @@ void do_hb_trajectory(Field<T> &S, const VectorField<T> &shift, const parameters
 ///////////////////////////////////////////////////////////////////////////////////
 // measurement functions
 
-template <typename T, typename sT, typename atype = hila::arithmetic_type<sT>>
-void sm_ready_field(const Field<T> &S, out_only Field<sT> &smS) {
-    onsites(ALL) {
-        if (S[X] > NCOLOR / 2) {
-            smS[X] = (sT)(S[X] - NCOLOR);
-        } else {
-            smS[X] = (sT)S[X];
+template <typename sT>
+void spectraldensity_surface(std::vector<sT> &surf, int size_x, int size_y,
+                             std::vector<double> &npow, std::vector<int> &hits) {
+
+    // do fft for the surface
+    static bool first = true;
+
+    static Complex<double> *buf;
+    static fftw_plan fftwplan;
+
+    int area = size_x * size_y;
+
+    if (first) {
+        first = false;
+
+        buf = (Complex<double> *)fftw_malloc(sizeof(Complex<double>) * area);
+
+        // note: we had x as the "fast" dimension, but fftw wants the 2nd dim to be
+        // the "fast" one. thus, first y, then x.
+        fftwplan = fftw_plan_dft_2d(size_y, size_x, (fftw_complex *)buf, (fftw_complex *)buf,
+                                    FFTW_FORWARD, FFTW_ESTIMATE);
+    }
+
+    for (int i = 0; i < area; i++) {
+        buf[i] = surf[i];
+    }
+
+    fftw_execute(fftwplan);
+
+    int pow_size = npow.size();
+
+    for (int i = 0; i < area; i++) {
+        int x = i % size_x;
+        int y = i / size_x;
+        x = (x <= size_x / 2) ? x : (size_x - x);
+        y = (y <= size_y / 2) ? y : (size_y - y);
+
+        int k = x * x + y * y;
+        if (k < pow_size) {
+            npow[k] += buf[i].squarenorm() / (area * area);
+            hits[k]++;
         }
     }
 }
+
+template <typename T>
+T proj_to_nrange(T inval) {
+    while (inval > (T)NCOLOR / 2) {
+        inval -= (T)NCOLOR;
+    }
+    while (inval <= -(T)(NCOLOR + 1) / 2) {
+        inval += (T)NCOLOR;
+    }
+    return inval;
+}
+
+template <typename T>
+T proj_to_nrange(T inval, T tol) {
+    while (inval >= (T)NCOLOR / 2 + tol) {
+        inval -= (T)NCOLOR;
+    }
+    while (inval <= -((T)NCOLOR / 2 + tol)) {
+        inval += (T)NCOLOR;
+    }
+    return inval;
+}
+
+
+template <typename T, typename sT, typename atype = hila::arithmetic_type<sT>>
+void sm_ready_field(const Field<T> &S, out_only Field<sT> &smS, out_only sT &smSmean) {
+    Reduction<double> smStot = 0;
+    smStot.allreduce(true).delayed(true);
+    onsites(ALL) {
+        smS[X] = (sT)proj_to_nrange(S[X]);
+        smStot += smS[X];
+    }
+    smSmean = smStot.value() / lattice.volume();
+}
+
 
 template <typename T, typename sT>
 void smear_field(Field<sT> &smS, const VectorField<T> &shift, sT smear_param, int n_smear) {
@@ -171,34 +249,16 @@ void smear_field(Field<sT> &smS, const VectorField<T> &shift, sT smear_param, in
         }
         foralldir(d) {
             onsites(ALL) {
-                sT tdiff = tsmS[ip][X + d] - (sT)shift[d][X] - tsmS[ip][X];
-                while (tdiff > 0.5 * (sT)NCOLOR) {
-                    tdiff -= (sT)NCOLOR;
-                }
-                while (tdiff <= -0.5 * (sT)NCOLOR) {
-                    tdiff += (sT)NCOLOR;
-                }
-                tsmS[1 - ip][X] += smear_param * tdiff;
+                tsmS[1 - ip][X] +=
+                    smear_param * proj_to_nrange(tsmS[ip][X + d] - (sT)shift[d][X] - tsmS[ip][X], (sT)0.5);
 
-                tdiff = tsmS[ip][X - d] + (sT)shift[d][X - d] - tsmS[ip][X];
-                while (tdiff > 0.5 * (sT)NCOLOR) {
-                    tdiff -= (sT)NCOLOR;
-                }
-                while (tdiff <= -0.5 * (sT)NCOLOR) {
-                    tdiff += (sT)NCOLOR;
-                }
-                tsmS[1 - ip][X] += smear_param * tdiff;
+                tsmS[1 - ip][X] += smear_param * proj_to_nrange(tsmS[ip][X - d] +
+                                                                (sT)shift[d][X - d] - tsmS[ip][X], (sT)0.5);
             }
         }
         onsites(ALL) {
-            sT tval = tsmS[1 - ip][X] / (1.0 + 2.0 * (sT)NDIM * smear_param);
-            while (tval > 0.5 * (sT)NCOLOR) {
-                tval -= (sT)NCOLOR;
-            }
-            while (tval <= -0.5 * (sT)NCOLOR) {
-                tval += (sT)NCOLOR;
-            }
-            tsmS[1 - ip][X] = tval;
+            tsmS[1 - ip][X] =
+                proj_to_nrange(tsmS[1 - ip][X] / (1.0 + 2.0 * (sT)NDIM * smear_param), (sT)0.5);
         }
         ip = 1 - ip;
     }
@@ -206,6 +266,40 @@ void smear_field(Field<sT> &smS, const VectorField<T> &shift, sT smear_param, in
         smS[X] = tsmS[ip][X];
     }
 }
+
+
+template <typename T, typename sT>
+void smear_field(Field<sT> &smS, const VectorField<T> &shift, sT smear_param, int n_smear, sT smSmean) {
+    int ip = 0;
+    Field<sT> tsmS[2];
+    onsites(ALL) {
+        tsmS[ip][X] = proj_to_nrange(smS[X] - smSmean);
+        //tsmS[ip][X] = smS[X] - smSmean;
+    }
+    for (int ism = 0; ism < n_smear; ++ism) {
+        onsites(ALL) {
+            tsmS[1 - ip][X] = tsmS[ip][X];
+        }
+        foralldir(d) {
+            onsites(ALL) {
+                tsmS[1 - ip][X] +=
+                    smear_param * (tsmS[ip][X + d] - (sT)shift[d][X]);
+
+                tsmS[1 - ip][X] +=
+                    smear_param * (tsmS[ip][X - d] + (sT)shift[d][X - d]);
+            }
+        }
+        onsites(ALL) {
+            tsmS[1 - ip][X] = tsmS[1 - ip][X] / (1.0 + 2.0 * (sT)NDIM * smear_param);
+        }
+        ip = 1 - ip;
+    }
+    onsites(ALL) {
+        smS[X] = proj_to_nrange(tsmS[ip][X] + smSmean);
+        //smS[X] = tsmS[ip][X] + smSmean;
+    }
+}
+
 
 template <typename sT>
 void measure_profile(const Field<sT> &smS, Direction d, std::vector<sT> &profile) {
@@ -222,6 +316,7 @@ void measure_profile(const Field<sT> &smS, Direction d, std::vector<sT> &profile
 int z_ind(int z, Direction dz) {
     return (z + lattice.size(dz)) % lattice.size(dz);
 }
+
 
 template <typename sT>
 void measure_interface(const Field<sT> &smS, Direction dz, std::vector<sT> &surf, out_only int &size_x, out_only int &size_y) {
@@ -263,7 +358,7 @@ void measure_interface(const Field<sT> &smS, Direction dz, std::vector<sT> &surf
 
     int startloc = (minloc + maxloc) / 2;
 
-    sT surface_level = 0.5 * (minp + maxp);
+    sT surface_level = 0.5 * (sT)(std::round(minp) + std::round(maxp));
 
 
     int ddz = 1;
@@ -311,53 +406,10 @@ void measure_interface(const Field<sT> &smS, Direction dz, std::vector<sT> &surf
     }
 }
 
-template <typename sT>
-void spectraldensity_surface(std::vector<sT> &surf, int size_x, int size_y,
-                             std::vector<double> &npow, std::vector<int> &hits) {
-
-    // do fft for the surface
-    static bool first = true;
-
-    static Complex<double> *buf;
-    static fftw_plan fftwplan;
-
-    int area = size_x * size_y;
-
-    if (first) {
-        first = false;
-
-        buf = (Complex<double> *)fftw_malloc(sizeof(Complex<double>) * area);
-
-        // note: we had x as the "fast" dimension, but fftw wants the 2nd dim to be
-        // the "fast" one. thus, first y, then x.
-        fftwplan = fftw_plan_dft_2d(size_y, size_x, (fftw_complex *)buf,
-                                    (fftw_complex *)buf, FFTW_FORWARD, FFTW_ESTIMATE);
-    }
-
-    for (int i = 0; i < area; i++) {
-        buf[i] = surf[i];
-    }
-
-    fftw_execute(fftwplan);
-
-    int pow_size = npow.size();
-
-    for (int i = 0; i < area; i++) {
-        int x = i % size_x;
-        int y = i / size_x;
-        x = (x <= size_x / 2) ? x : (size_x - x);
-        y = (y <= size_y / 2) ? y : (size_y - y);
-
-        int k = x * x + y * y;
-        if (k < pow_size) {
-            npow[k] += buf[i].squarenorm() / (area * area);
-            hits[k]++;
-        }
-    }
-}
 
 template <typename sT>
-void measure_interface_spectrum(Field<sT> &smS, Direction dir_z, int nsm, int64_t idump, parameters &p, bool first_pow) {
+void measure_interface_spectrum(Field<sT> &smS, Direction dir_z, int bds_shift, int nsm,
+                                int64_t idump, parameters &p, bool first_pow) {
     std::vector<ftype> surf;
     int size_x, size_y;
     measure_interface(smS, dir_z, surf, size_x, size_y);
@@ -375,6 +427,203 @@ void measure_interface_spectrum(Field<sT> &smS, Direction dir_z, int nsm, int64_
         spectraldensity_surface(surf, size_x, size_y, npow, hits);
 
         std::string prof_file = string_format("profile_nsm%04d", nsm);
+        std::ofstream prof_os;
+
+        if (first_pow) {
+            int64_t npowmeas = 0;
+            for (int ipow = 0; ipow < pow_size; ++ipow) {
+                if (hits[ipow] > 0) {
+                    ++npowmeas;
+                }
+            }
+
+            if (filesys_ns::exists(prof_file)) {
+                std::string prof_file_temp = prof_file + "_temp";
+                filesys_ns::rename(prof_file, prof_file_temp);
+                std::ifstream ifile;
+                ifile.open(prof_file_temp, std::ios::in | std::ios::binary);
+                prof_os.open(prof_file, std::ios::out | std::ios::binary);
+
+                int64_t *ibuff = (int64_t *)memalloc((NDIM + 5) * sizeof(int64_t));
+                ifile.read((char *)ibuff, (NDIM + 5) * sizeof(int64_t));
+                prof_os.write((char *)ibuff, (NDIM + 5) * sizeof(int64_t));
+                int64_t tnpowmeas = ibuff[NDIM + 2];
+                double *buffer = nullptr;
+                if (tnpowmeas > npowmeas) {
+                    buffer = (double *)memalloc(tnpowmeas * sizeof(double));
+                } else {
+                    buffer = (double *)memalloc(npowmeas * sizeof(double));
+                    for (int tib = tnpowmeas; tib < npowmeas; ++tib) {
+                        buffer[tib] = 0;
+                    }
+                }
+                ifile.read((char *)buffer, sizeof(double));
+                prof_os.write((char *)buffer, sizeof(double));
+
+                ifile.read((char *)buffer, tnpowmeas * sizeof(double));
+
+                npowmeas = 0;
+                for (int ipow = 0; ipow < pow_size; ++ipow) {
+                    if (hits[ipow] > 0) {
+                        buffer[npowmeas] = (double)ipow;
+                        ++npowmeas;
+                    }
+                }
+                prof_os.write((char *)buffer, npowmeas * sizeof(double));
+
+                while (ifile.good()) {
+                    ifile.read((char *)ibuff, sizeof(int64_t));
+                    int64_t tidump = ibuff[0];
+                    ifile.read((char *)buffer, tnpowmeas * sizeof(double));
+                    if (ifile.good() && tidump < idump) {
+                        prof_os.write((char *)&(tidump), sizeof(int64_t));
+                        prof_os.write((char *)buffer, npowmeas * sizeof(double));
+                    } else {
+                        break;
+                    }
+                }
+                ifile.close();
+                prof_os.close();
+                free(buffer);
+                free(ibuff);
+                filesys_ns::remove(prof_file_temp);
+            } else {
+                prof_os.open(prof_file, std::ios::out | std::ios::binary);
+                int64_t *ibuff = (int64_t *)memalloc((NDIM + 5) * sizeof(int64_t));
+                ibuff[0] = NCOLOR;
+                ibuff[1] = NDIM;
+                foralldir(d) {
+                    ibuff[2 + (int)d] = lattice.size(d);
+                }
+                ibuff[NDIM + 2] = npowmeas;
+                ibuff[NDIM + 3] = nsm;
+                ibuff[NDIM + 4] = sizeof(double);
+                prof_os.write((char *)ibuff, (NDIM + 5) * sizeof(int64_t));
+                double tval = p.smear_param;
+                prof_os.write((char *)&(tval), sizeof(double));
+
+                double *buffer = (double *)memalloc(npowmeas * sizeof(double));
+                for (int tib = npowmeas; tib < npowmeas; ++tib) {
+                    buffer[tib] = 0;
+                }
+                npowmeas = 0;
+                for (int ipow = 0; ipow < pow_size; ++ipow) {
+                    if (hits[ipow] > 0) {
+                        buffer[npowmeas] = (double)ipow;
+                        ++npowmeas;
+                    }
+                }
+                prof_os.write((char *)buffer, npowmeas * sizeof(double));
+
+                prof_os.close();
+                free(buffer);
+                free(ibuff);
+            }
+        }
+
+        prof_os.open(prof_file, std::ios::out | std::ios_base::app | std::ios::binary);
+
+        prof_os.write((char *)&(idump), sizeof(int64_t));
+        for (int ipow = 0; ipow < pow_size; ++ipow) {
+            if (hits[ipow] > 0) {
+                double tval = npow[ipow] / hits[ipow];
+                prof_os.write((char *)&(tval), sizeof(double));
+            }
+        }
+        prof_os.close();
+    }
+}
+
+
+template <typename T>
+Complex<T> phase_to_complex(T arg) {
+    return Complex<T>(cos(arg), sin(arg));
+}
+
+
+template <typename sT>
+void measure_interface_ft(const Field<sT> &smS, Direction dz, int bds_shift, std::vector<sT> &surf,
+                          out_only int &size_x, out_only int &size_y) {
+
+    Direction dx, dy;
+    foralldir(td) if (td != dz) {
+        dx = td;
+        break;
+    }
+    foralldir(td) if (td != dz && td != dx) {
+        dy = td;
+        break;
+    }
+
+    size_x = lattice.size(dx);
+    size_y = lattice.size(dy);
+
+    int area = size_x * size_y;
+
+    static std::vector<Complex<ftype>> ft_basis;
+    static bool first = true;
+
+    if (first) {
+        first = false;
+        ft_basis.resize(lattice.size(dz));
+        for (int iz = 0; iz < lattice.size(dz); ++iz) {
+            ftype ftarg =
+                2.0 * M_PI * (ftype)iz / (ftype)lattice.size(dz) * (ftype)bds_shift / (ftype)NCOLOR;
+            ft_basis[iz] = phase_to_complex(ftarg);
+        }
+    }
+
+    if (hila::myrank() == 0) {
+        surf.resize(area);
+    }
+
+    std::vector<sT> lS;
+
+    CoordinateVector yslice;
+    foralldir(td) {
+        yslice[td] = -1;
+    }
+    Complex<sT> ftn;
+    for (int y = 0; y < size_y; ++y) {
+        yslice[dy] = y;
+        lS = smS.get_slice(yslice);
+        if (hila::myrank() == 0) {
+            for (int x = 0; x < size_x; ++x) {
+                ftn = 0;
+                for (int z = 0; z < lattice.size(dz); z++) {
+                    ftn += phase_to_complex(2.0 * M_PI * (ftype)lS[x + size_x * z] / (ftype)NCOLOR) * ft_basis[z];
+                }
+
+                surf[x + y * size_x] = (ftype)arg(ftn) * ((ftype)NCOLOR * (ftype)lattice.size(dz)) /
+                                           (2.0 * M_PI * bds_shift) +
+                                       (ftype)(lattice.size(dz) + 1) / 2;
+            }
+        }
+    }
+}
+
+
+template <typename sT>
+void measure_interface_spectrum_ft(Field<sT> &smS, Direction dir_z, int bds_shift, int nsm,
+                                int64_t idump, parameters &p, bool first_pow) {
+    std::vector<ftype> surf;
+    int size_x, size_y;
+    measure_interface_ft(smS, dir_z, bds_shift, surf, size_x, size_y);
+    if (hila::myrank() == 0) {
+        if (false) {
+            for (int x = 0; x < size_x; ++x) {
+                for (int y = 0; y < size_y; ++y) {
+                    hila::out0 << "SURFFT" << nsm << ' ' << x << ' ' << y << ' '
+                               << surf[x + y * size_x] << '\n';
+                }
+            }
+        }
+        constexpr int pow_size = 200;
+        std::vector<double> npow(pow_size);
+        std::vector<int> hits(pow_size);
+        spectraldensity_surface(surf, size_x, size_y, npow, hits);
+
+        std::string prof_file = string_format("profile_ft_nsm%04d", nsm);
         std::ofstream prof_os;
 
         if (first_pow) {
@@ -620,10 +869,6 @@ int main(int argc, char **argv) {
     // .get() -method can read many different input types,
     // see file "input.h" for documentation
 
-    for (int i = 0; i < NCOLOR; ++i) {
-        sp_state[i] = Complex<ftype>(cos(2.0 * M_PI * (ftype)i / (ftype)NCOLOR),
-                                     sin(2.0 * M_PI * (ftype)i / (ftype)NCOLOR));
-    }
 
     parameters p;
 
@@ -664,6 +909,7 @@ int main(int argc, char **argv) {
 
     par.close(); // file is closed also when par goes out of scope
 
+
     // set up the lattice
     lattice.setup(lsize);
 
@@ -674,13 +920,14 @@ int main(int argc, char **argv) {
     // use negative trajectory for thermal
     int start_traj = -p.n_therm;
 
+    Direction dir_z = Direction(bds_dir);
+
+
     // Alloc and define boundary shift vector field
     VectorField<fT> shift(0);
-    
-    Direction dir_z = Direction(bds_dir);
     onsites(ALL) {
         if (X.coordinate(dir_z) == lattice.size(dir_z) - 1) {
-            shift[dir_z][X] = (bds_shift + NCOLOR) % NCOLOR;
+            shift[dir_z][X] = bds_shift;
         } else {
             shift[dir_z][X] = 0;
         }
@@ -722,15 +969,19 @@ int main(int argc, char **argv) {
         measure_stuff(S, shift, p);
         if (trajectory + 1 >= 0) {
 
-            if ((p.n_profile && (trajectory + 1) % p.n_profile == 0) ||
-                (p.n_dump_conf && (trajectory + 1) % p.n_dump_conf == 0)) {
-                Field<ftype> smS;
-                sm_ready_field(S, smS);
+            if (p.n_profile && (trajectory + 1) % p.n_profile == 0) {
 
                 int64_t idump = (trajectory + 1) / p.n_profile;
+
+                Field<ftype> smS;
+                ftype smSmean;
+                sm_ready_field(S, smS, smSmean);
+                smSmean = -0.5 * (ftype)bds_shift;
+
                 int n_smear = 0;
+
                 for (int ism = 0; ism < p.n_smear.size(); ++ism) {
-                    smear_field(smS, shift, p.smear_param, p.n_smear[ism] - n_smear);
+                    smear_field(smS, shift, p.smear_param, p.n_smear[ism] - n_smear, smSmean);
                     n_smear = p.n_smear[ism];
 
                     if (p.n_dump_conf && (trajectory + 1) % p.n_dump_conf == 0) {
@@ -741,10 +992,12 @@ int main(int argc, char **argv) {
                     }
 
                     if (p.n_profile && (trajectory + 1) % p.n_profile == 0) {
-                        measure_interface_spectrum(smS, dir_z, n_smear, idump, p, first_pow);
+                        measure_interface_spectrum_ft(smS, dir_z, bds_shift, n_smear, idump, p,
+                                                      first_pow);
+                        measure_interface_spectrum(smS, dir_z, bds_shift, n_smear, idump, p,
+                                                      first_pow);
                     }
                 }
-
                 first_pow = false;
             }
         }
