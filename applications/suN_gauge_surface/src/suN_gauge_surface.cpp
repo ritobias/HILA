@@ -301,8 +301,6 @@ void measure_polyakov_profile(GaugeField<group> &U) {
     p.allreduce(false);
     onsites(ALL) if (X.coordinate(e_t) == 0) {
         p[X.z()] += pl[X];
-        if (X.x() == 0 && X.y() == 0)
-            p1[X.z()] += pl[X];
     }
     return p.vector();
 
