@@ -28,6 +28,7 @@ struct parameters {
     int n_thermal;
     int n_save;
     int n_profile;
+    int n_surf_spec;
     std::string config_file;
     double time_offset;
     poly_limit polyakov_pot;
@@ -290,6 +291,27 @@ int z_ind(int z) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////////
+
+template <typename group>
+void measure_polyakov_profile(GaugeField<group> &U) {
+    Field<float> pl;
+    measure_polyakov_field(U[e_t], pl);
+
+    ReductionVector<float> p(lattice.size(e_z));
+    p.allreduce(false);
+    onsites(ALL) if (X.coordinate(e_t) == 0) {
+        p[X.z()] += pl[X];
+        if (X.x() == 0 && X.y() == 0)
+            p1[X.z()] += pl[X];
+    }
+    return p.vector();
+
+    for (int z = 0; z < lattice.size(e_z); z++) {
+        hila::out0 << "PPOLY " << z << ' ' << p[z] / (lattice.size(e_x) * lattice.size(e_y))
+                   << '\n';
+    }
+}
+
 
 template <typename group>
 void measure_polyakov_surface(GaugeField<group> &U, const parameters &p, int traj) {
@@ -691,7 +713,13 @@ int main(int argc, char **argv) {
         p.n_profile = 0;
     }
 
-    if (p.n_profile) {
+    if (par.get_item("updates/surf spec meas", {"off", "%i"}) == 1) {
+        p.n_surf_spec = par.get();
+    } else {
+        p.n_surf_spec = 0;
+    }
+
+    if (p.n_surf_spec) {
         p.n_smear = par.get("smearing steps");
         p.smear_coeff = par.get("smear coefficient");
         p.z_smear = par.get("z smearing steps");
@@ -759,8 +787,12 @@ int main(int argc, char **argv) {
 
             measure_stuff(U, p);
 
-            if (p.n_profile && (trajectory + 1) % p.n_profile == 0) {
+            if (p.n_surf_spec && (trajectory + 1) % p.n_surf_spec == 0) {
                 measure_polyakov_surface(U, p, trajectory);
+            }
+
+            if (p.n_profile && (trajectory + 1) % p.n_profile == 0) {
+                measure_polyakov_profile(U);
                 measure_plaq_profile(U);
             }
 

@@ -162,6 +162,31 @@ Complex<T> phase_to_complex(T arg) {
     return Complex<T>(cos(arg), sin(arg));
 }
 
+
+template <typename T>
+T proj_to_nrange(T inval) {
+    while (inval > (T)NCOLOR / 2) {
+        inval -= (T)NCOLOR;
+    }
+    while (inval <= -(T)(NCOLOR + 1) / 2) {
+        inval += (T)NCOLOR;
+    }
+    return inval;
+}
+
+
+template <typename T>
+T proj_to_nrange(T inval, T tol) {
+    while (inval > (T)NCOLOR / 2 + tol) {
+        inval -= (T)NCOLOR;
+    }
+    while (inval <= -((T)NCOLOR / 2 + tol)) {
+        inval += (T)NCOLOR;
+    }
+    return inval;
+}
+
+
 template <typename sT>
 void spectraldensity_surface(std::vector<sT> &surf, int size_x, int size_y,
                              std::vector<double> &npow, std::vector<int> &hits) {
@@ -207,28 +232,6 @@ void spectraldensity_surface(std::vector<sT> &surf, int size_x, int size_y,
     }
 }
 
-template <typename T>
-T proj_to_nrange(T inval) {
-    while (inval > (T)NCOLOR / 2) {
-        inval -= (T)NCOLOR;
-    }
-    while (inval <= -(T)(NCOLOR + 1) / 2) {
-        inval += (T)NCOLOR;
-    }
-    return inval;
-}
-
-template <typename T>
-T proj_to_nrange(T inval, T tol) {
-    while (inval > (T)NCOLOR / 2 + tol) {
-        inval -= (T)NCOLOR;
-    }
-    while (inval <= -((T)NCOLOR / 2 + tol)) {
-        inval += (T)NCOLOR;
-    }
-    return inval;
-}
-
 
 template <typename T, typename sT, typename atype = hila::arithmetic_type<sT>>
 void sm_ready_field(const Field<T> &S, out_only Field<sT> &smS, out_only sT &smSmean) {
@@ -251,7 +254,7 @@ void smear_field(Field<sT> &smS, const VectorField<T> &shift, sT smear_param, in
     }
     for (int ism = 0; ism < n_smear; ++ism) {
         onsites(ALL) {
-            tsmS[1 - ip][X] = tsmS[ip][X] * (1.0 + 2.0 * (sT)NDIM * smear_param);
+            tsmS[1 - ip][X] = tsmS[ip][X] * ((sT)1.0 + (sT)(2 * NDIM) * smear_param);
         }
         foralldir(d) {
             onsites(ALL) {
@@ -264,7 +267,7 @@ void smear_field(Field<sT> &smS, const VectorField<T> &shift, sT smear_param, in
         }
         onsites(ALL) {
             tsmS[1 - ip][X] =
-                proj_to_nrange(tsmS[1 - ip][X] / (1.0 + 2.0 * (sT)NDIM * smear_param), (sT)0.5);
+                proj_to_nrange(tsmS[1 - ip][X] / ((sT)1.0 + (sT)(2 * NDIM) * smear_param), (sT)0.5);
         }
         ip = 1 - ip;
     }
@@ -280,7 +283,6 @@ void smear_field(Field<sT> &smS, const VectorField<T> &shift, sT smear_param, in
     Field<sT> tsmS[2];
     onsites(ALL) {
         tsmS[ip][X] = proj_to_nrange(smS[X] - smSmean, (sT)0.0);
-        //tsmS[ip][X] = smS[X] - smSmean;
     }
     for (int ism = 0; ism < n_smear; ++ism) {
         onsites(ALL) {
@@ -296,13 +298,12 @@ void smear_field(Field<sT> &smS, const VectorField<T> &shift, sT smear_param, in
             }
         }
         onsites(ALL) {
-            tsmS[1 - ip][X] = tsmS[1 - ip][X] / (1.0 + 2.0 * (sT)NDIM * smear_param);
+            tsmS[1 - ip][X] = tsmS[1 - ip][X] / ((sT)1.0 + (sT)(2 * NDIM) * smear_param);
         }
         ip = 1 - ip;
     }
     onsites(ALL) {
         smS[X] = proj_to_nrange(tsmS[ip][X] + smSmean, (sT)0.0);
-        //smS[X] = tsmS[ip][X] + smSmean;
     }
 }
 
