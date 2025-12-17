@@ -302,7 +302,6 @@ void measure_polyakov_profile(GaugeField<group> &U) {
     onsites(ALL) if (X.coordinate(e_t) == 0) {
         p[X.z()] += pl[X];
     }
-    return p.vector();
 
     for (int z = 0; z < lattice.size(e_z); z++) {
         hila::out0 << "PPOLY " << z << ' ' << p[z] / (lattice.size(e_x) * lattice.size(e_y))
