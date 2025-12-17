@@ -1,8 +1,8 @@
-# This is a parameter file for ZN_clock_model program
+# This is a parameter file for ZN_spin_model program
 
-lattice size           120,120,60
-betac                  0.075
-betap                  0.875
+lattice size           60,60,60
+beta                   0.85
+beta potts frac        0.921
 source term magnitude  0
 source term direction  0
 bds direction          2
@@ -17,4 +17,4 @@ config name            config
 trajs/profile measure  2
 trajs/config dump      100
 smearing coeff         0.9
-smearing steps         0,10,20,40
+smearing steps         0,1,2,4,16

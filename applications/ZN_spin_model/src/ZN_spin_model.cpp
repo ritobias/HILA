@@ -156,6 +156,12 @@ void do_hb_trajectory(Field<T> &S, const VectorField<T> &shift, const parameters
 ///////////////////////////////////////////////////////////////////////////////////
 // measurement functions
 
+
+template <typename T>
+Complex<T> phase_to_complex(T arg) {
+    return Complex<T>(cos(arg), sin(arg));
+}
+
 template <typename sT>
 void spectraldensity_surface(std::vector<sT> &surf, int size_x, int size_y,
                              std::vector<double> &npow, std::vector<int> &hits) {
@@ -299,7 +305,6 @@ void smear_field(Field<sT> &smS, const VectorField<T> &shift, sT smear_param, in
         //smS[X] = tsmS[ip][X] + smSmean;
     }
 }
-
 
 template <typename sT>
 void measure_profile(const Field<sT> &smS, Direction d, std::vector<sT> &profile) {
@@ -532,12 +537,6 @@ void measure_interface_spectrum(Field<sT> &smS, Direction dir_z, int bds_shift, 
         }
         prof_os.close();
     }
-}
-
-
-template <typename T>
-Complex<T> phase_to_complex(T arg) {
-    return Complex<T>(cos(arg), sin(arg));
 }
 
 
@@ -877,10 +876,12 @@ int main(int argc, char **argv) {
     CoordinateVector lsize;
     // reads NDIM numbers
     lsize = par.get("lattice size");
+    ftype tbeta = par.get("beta");
+    ftype tbetapfrac = par.get("beta potts frac");
     // clock model coupling
-    p.betac = par.get("betac");
+    p.betac = tbeta * ((ftype)1.0 - tbetapfrac);
     // Potts model coupling
-    p.betap = par.get("betap");
+    p.betap = tbeta * tbetapfrac;
     // source term
     p.source = par.get("source term magnitude");
     p.source_state = par.get("source term direction");
