@@ -1,12 +1,12 @@
 # This is a parameter file for ZN_spin_model program
 
 lattice size           60,60,60
-beta                   0.75
+beta                   0.85
 beta potts frac        0.921
 source term magnitude  0
-source term direction  0
+source term phase      0
 bds direction          2
-bds shift              1
+bds shift              -2
 number of trajectories 1000
 heatbath updates       100
 number of hb hits      1

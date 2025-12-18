@@ -16,7 +16,7 @@ struct parameters {
     ftype betac;        // clock model coupling
     ftype betap;        // Potts model coupling
     ftype source;       // source J
-    int source_state;   // source state
+    ftype source_phase; // source phase angle
     int n_traj;         // number of trajectories to generate
     int n_therm;        // number of thermalization trajectories (counts only accepted traj.)
     int n_heatbath;     // number of heat-bath sweeps per "trajectory"
@@ -40,14 +40,16 @@ struct parameters {
 // heat-bath functions
 
 template <typename nnT, typename atype = hila::arithmetic_type<nnT>>
-void ZN_heatbath(int &S, const nnT &nnsum, const Vector<NCOLOR,int> &nnlist, ftype betac, ftype betap, ftype source, int source_state) {
+void ZN_heatbath(int &S, const nnT &nnsum, const Vector<NCOLOR,int> &nnlist, ftype betac, ftype betap, ftype source, ftype source_phase) {
     atype nnsumabs = abs(nnsum);
     atype nnsumarg = arg(nnsum);
 
     atype wl[NCOLOR];
     atype wlsum = 0.0;
     for (int i = 0; i < NCOLOR; ++i) {
-        wl[i] = exp(betac * nnsumabs * cos(2.0 * M_PI * (ftype)i / (ftype)NCOLOR - nnsumarg) + betap * nnlist[i]  + source * cos(2.0 * M_PI * (ftype)(i - source_state) / (ftype)NCOLOR));
+        wl[i] = exp(betac * nnsumabs * cos(2.0 * M_PI * (ftype)i / (ftype)NCOLOR - nnsumarg) +
+                    betap * nnlist[i] +
+                    source * cos(2.0 * M_PI * ((ftype)i - source_phase) / (ftype)NCOLOR));
         wlsum += wl[i];
     }
     atype rand_val = hila::random();
@@ -105,7 +107,7 @@ void hb_update_parity(Field<T> &S, const VectorField<T> &shift, const parameters
 
     onsites(par) {
         for (int i = 0; i < p.n_multhits; ++i) {
-            ZN_heatbath(S[X], nnsum[X], nnlist[X], p.betac, p.betap, p.source, p.source_state);
+            ZN_heatbath(S[X], nnsum[X], nnlist[X], p.betac, p.betap, p.source, p.source_phase);
         }
     }
 }
@@ -282,7 +284,7 @@ void smear_field(Field<sT> &smS, const VectorField<T> &shift, sT smear_param, in
     int ip = 0;
     Field<sT> tsmS[2];
     onsites(ALL) {
-        tsmS[ip][X] = proj_to_nrange(smS[X] - smSmean, (sT)0.0);
+        tsmS[ip][X] = proj_to_nrange(smS[X] - smSmean, (sT)0);
     }
     for (int ism = 0; ism < n_smear; ++ism) {
         onsites(ALL) {
@@ -303,7 +305,7 @@ void smear_field(Field<sT> &smS, const VectorField<T> &shift, sT smear_param, in
         ip = 1 - ip;
     }
     onsites(ALL) {
-        smS[X] = proj_to_nrange(tsmS[ip][X] + smSmean, (sT)0.0);
+        smS[X] = proj_to_nrange(tsmS[ip][X] + smSmean, (sT)0);
     }
 }
 
@@ -542,7 +544,7 @@ void measure_interface_spectrum(Field<sT> &smS, Direction dir_z, int bds_shift, 
 
 
 template <typename sT>
-void measure_interface_ft(const Field<sT> &smS, Direction dz, int bds_shift, std::vector<sT> &surf,
+void measure_interface_ft_old(const Field<sT> &smS, Direction dz, int bds_shift, std::vector<sT> &surf,
                           out_only int &size_x, out_only int &size_y) {
 
     Direction dx, dy;
@@ -604,6 +606,73 @@ void measure_interface_ft(const Field<sT> &smS, Direction dz, int bds_shift, std
 
 
 template <typename sT>
+void measure_interface_ft(const Field<sT> &smS, Direction dz, int bds_shift, std::vector<sT> &surf,
+                          out_only int &size_x, out_only int &size_y) {
+
+    Direction dx, dy;
+    foralldir(td) if (td != dz) {
+        dx = td;
+        break;
+    }
+    foralldir(td) if (td != dz && td != dx) {
+        dy = td;
+        break;
+    }
+
+    size_x = lattice.size(dx);
+    size_y = lattice.size(dy);
+
+    int area = size_x * size_y;
+
+    static std::vector<Complex<ftype>> ft_basis;
+    static bool first = true;
+
+    if (first) {
+        first = false;
+        ft_basis.resize(lattice.size(dz));
+        ftype tsign = (ftype)1.0;
+        if(bds_shift < 0) {
+            tsign = -tsign;
+        }
+        for (int iz = 0; iz < lattice.size(dz); ++iz) {
+            ftype ftarg =
+                M_PI * (ftype)iz / (ftype)lattice.size(dz);
+            ft_basis[iz] = tsign * phase_to_complex(ftarg);
+        }
+    }
+
+    if (hila::myrank() == 0) {
+        surf.resize(area);
+    }
+
+    std::vector<sT> lS;
+
+    CoordinateVector yslice;
+    foralldir(td) {
+        yslice[td] = -1;
+    }
+    Complex<sT> ftn;
+    for (int y = 0; y < size_y; ++y) {
+        yslice[dy] = y;
+        lS = smS.get_slice(yslice);
+        if (hila::myrank() == 0) {
+            for (int x = 0; x < size_x; ++x) {
+                ftn = 0;
+                for (int z = 0; z < lattice.size(dz); z++) {
+                    ftn +=
+                        (2.0 * (ftype)lS[x + size_x * z] + (ftype)bds_shift) *
+                        ft_basis[z];
+                }
+
+                surf[x + y * size_x] = (ftype)arg(ftn) * (ftype)lattice.size(dz) / M_PI +
+                                       (ftype)(lattice.size(dz) + 1) / 2;
+            }
+        }
+    }
+}
+
+
+template <typename sT>
 void measure_interface_spectrum_ft(Field<sT> &smS, Direction dir_z, int bds_shift, int nsm,
                                 int64_t idump, parameters &p, bool first_pow) {
     std::vector<ftype> surf;
@@ -619,8 +688,8 @@ void measure_interface_spectrum_ft(Field<sT> &smS, Direction dir_z, int bds_shif
             }
         }
         constexpr int pow_size = 200;
-        std::vector<double> npow(pow_size);
-        std::vector<int> hits(pow_size);
+        std::vector<double> npow(pow_size, 0);
+        std::vector<int> hits(pow_size, 0);
         spectraldensity_surface(surf, size_x, size_y, npow, hits);
 
         std::string prof_file = string_format("profile_ft_nsm%04d", nsm);
@@ -749,7 +818,7 @@ double measure_s(const Field<T> &S, const VectorField<T> &shift, const parameter
     }
     // potential term:
     onsites(ALL) {
-        s_source += -p.source * cos(2.0 * M_PI * (ftype)(S[X] - p.source_state) / (ftype)NCOLOR);
+        s_source += -p.source * cos(2.0 * M_PI * ((ftype)S[X] - p.source_phase) / (ftype)NCOLOR);
         volfr[S[X]] += 1.0;
     }
     volfr.reduce();
@@ -885,7 +954,7 @@ int main(int argc, char **argv) {
     p.betap = tbeta * tbetapfrac;
     // source term
     p.source = par.get("source term magnitude");
-    p.source_state = par.get("source term direction");
+    p.source_phase = par.get("source term phase");
     // boundary shift
     int bds_dir = par.get("bds direction");
     int bds_shift = par.get("bds shift");
@@ -979,6 +1048,12 @@ int main(int argc, char **argv) {
                 ftype smSmean;
                 sm_ready_field(S, smS, smSmean);
                 smSmean = -0.5 * (ftype)bds_shift;
+                if(false) {
+                    // add noise for stability test
+                    onsites(ALL) {
+                        smS[X] += (ftype)(0.35 * hila::gaussrand());
+                    }
+                }
 
                 int n_smear = 0;
 
