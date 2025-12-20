@@ -112,12 +112,12 @@ class Field {
                 for (int p = 0; p < 3; p++) {
                     gather_status_arr[p][d] = gather_status_t::NOT_DONE;
 #ifndef GENGATHER
-                    receive_request[p][d] = nullptr;
-                    send_request[p][d] = nullptr;
+                    receive_request[p][d] = 0;
+                    send_request[p][d] = 0;
 #else
                     for (int iggpn = 0; iggpn < MAX_GG_PER_DIR; ++iggpn) {
-                        receive_request[p][d][iggpn] = nullptr;
-                        send_request[p][d][iggpn] = nullptr;
+                        receive_request[p][d][iggpn] = 0;
+                        send_request[p][d][iggpn] = 0;
                     }
 #endif
                 }

@@ -546,7 +546,11 @@ void measure_interface_spectrum(Field<sT> &smS, Direction dir_z, int bds_shift, 
 template <typename sT>
 void measure_interface_ft_old(const Field<sT> &smS, Direction dz, int bds_shift, std::vector<sT> &surf,
                           out_only int &size_x, out_only int &size_y) {
-
+    // detect interface by projecting Z_n states on U(1) and make the resulting field virtually
+    // periodic in z-direction by joining NCOLOR appropriately shifted copies if it. Then take for
+    // each (x,y) the 1d fourier transform in z-direction (virtual z-size: NCOLOR *
+    // lattice.size(dz)) and read off the interface location z(x,y) from the phase shift of the
+    // fourier mode with z-momentum "2 \pi * bds_shift".
     Direction dx, dy;
     foralldir(td) if (td != dz) {
         dx = td;
@@ -562,15 +566,15 @@ void measure_interface_ft_old(const Field<sT> &smS, Direction dz, int bds_shift,
 
     int area = size_x * size_y;
 
-    static std::vector<Complex<ftype>> ft_basis;
+    static std::vector<Complex<sT>> ft_basis;
     static bool first = true;
 
     if (first) {
         first = false;
         ft_basis.resize(lattice.size(dz));
         for (int iz = 0; iz < lattice.size(dz); ++iz) {
-            ftype ftarg =
-                2.0 * M_PI * (ftype)iz / (ftype)lattice.size(dz) * (ftype)bds_shift / (ftype)NCOLOR;
+            sT ftarg =
+                2.0 * M_PI * (sT)iz / (sT)lattice.size(dz) * (sT)bds_shift / (sT)NCOLOR;
             ft_basis[iz] = phase_to_complex(ftarg);
         }
     }
@@ -593,12 +597,12 @@ void measure_interface_ft_old(const Field<sT> &smS, Direction dz, int bds_shift,
             for (int x = 0; x < size_x; ++x) {
                 ftn = 0;
                 for (int z = 0; z < lattice.size(dz); z++) {
-                    ftn += phase_to_complex(2.0 * M_PI * (ftype)lS[x + size_x * z] / (ftype)NCOLOR) * ft_basis[z];
+                    ftn += phase_to_complex(2.0 * M_PI * (sT)lS[x + size_x * z] / (sT)NCOLOR) * ft_basis[z];
                 }
 
-                surf[x + y * size_x] = (ftype)arg(ftn) * ((ftype)NCOLOR * (ftype)lattice.size(dz)) /
+                surf[x + y * size_x] = (sT)arg(ftn) * ((sT)NCOLOR * (sT)lattice.size(dz)) /
                                            (2.0 * M_PI * bds_shift) +
-                                       (ftype)(lattice.size(dz) + 1) / 2;
+                                       (sT)(lattice.size(dz) + 1) / 2;
             }
         }
     }
@@ -624,19 +628,19 @@ void measure_interface_ft(const Field<sT> &smS, Direction dz, int bds_shift, std
 
     int area = size_x * size_y;
 
-    static std::vector<Complex<ftype>> ft_basis;
+    static std::vector<Complex<sT>> ft_basis;
     static bool first = true;
 
     if (first) {
         first = false;
         ft_basis.resize(lattice.size(dz));
-        ftype tsign = (ftype)1.0;
+        sT tsign = (sT)1.0;
         if(bds_shift < 0) {
             tsign = -tsign;
         }
         for (int iz = 0; iz < lattice.size(dz); ++iz) {
-            ftype ftarg =
-                M_PI * (ftype)iz / (ftype)lattice.size(dz);
+            sT ftarg =
+                M_PI * (sT)iz / (sT)lattice.size(dz);
             ft_basis[iz] = tsign * phase_to_complex(ftarg);
         }
     }
@@ -660,12 +664,12 @@ void measure_interface_ft(const Field<sT> &smS, Direction dz, int bds_shift, std
                 ftn = 0;
                 for (int z = 0; z < lattice.size(dz); z++) {
                     ftn +=
-                        (2.0 * (ftype)lS[x + size_x * z] + (ftype)bds_shift) *
+                        (2.0 * (sT)lS[x + size_x * z] + (sT)bds_shift) *
                         ft_basis[z];
                 }
 
-                surf[x + y * size_x] = (ftype)arg(ftn) * (ftype)lattice.size(dz) / M_PI +
-                                       (ftype)(lattice.size(dz) + 1) / 2;
+                surf[x + y * size_x] = (sT)arg(ftn) * (sT)lattice.size(dz) / M_PI +
+                                       (sT)(lattice.size(dz) + 1) / 2;
             }
         }
     }
