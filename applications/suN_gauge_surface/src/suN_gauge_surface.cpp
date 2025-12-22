@@ -23,7 +23,7 @@ struct parameters {
     double beta;
     double deltab;
     int n_overrelax;
-    int n_update;
+    int n_heatbath;
     int n_trajectories;
     int n_thermal;
     int n_save;
@@ -513,12 +513,35 @@ void measure_polyakov_surface(GaugeField<group> &U, const parameters &p, int tra
 ////////////////////////////////////////////////////////////////
 
 template <typename group>
-void update(GaugeField<group> &U, const parameters &p, bool relax) {
+void update(GaugeField<group> &U, const parameters &p) {
 
-    for (const auto &dp : hila::shuffle_directions_and_parities()) {
+    std::array<int, 2 * NDIM> rnarr;
+    for (int i = 0; i < 2 * NDIM; ++i) {
+        // randomly choose a parity and a direction:
+        rnarr[i] = (int)(hila::random() * 2 * NDIM);
 
-        update_parity_dir(U, p, dp.parity, dp.direction, relax);
+        // randomly choose whether to do overrelaxation or heatbath update (with probabilities
+        // according to specified p.n_heatbath and p.n_overrelax):
+        if (hila::random() >= (double)p.n_heatbath / (p.n_heatbath + p.n_overrelax)) {
+            rnarr[i] += 2 * NDIM;
+        }
     }
+    hila::broadcast(rnarr);
+
+    for (int i = 0; i < 2 * NDIM; ++i) {
+        bool relax = false;
+        int tdp = rnarr[i];
+        if (tdp >= 2 * NDIM) {
+            tdp -= 2 * NDIM;
+            relax = true;
+        }
+        int tdir = tdp / 2;
+        int tpar = 1 + (tdp % 2);
+
+        // perform the selected updates:
+        update_parity_dir(U, p, Parity(tpar), Direction(tdir), relax);
+    }
+
 }
 
 ////////////////////////////////////////////////////////////////
@@ -568,11 +591,8 @@ void update_parity_dir(GaugeField<group> &U, const parameters &p, Parity par, Di
 template <typename group>
 void do_trajectory(GaugeField<group> &U, const parameters &p) {
 
-    for (int n = 0; n < p.n_update; n++) {
-        for (int i = 0; i < p.n_overrelax; i++) {
-            update(U, p, true);
-        }
-        update(U, p, false);
+    for (int n = 0; n < p.n_heatbath + p.n_overrelax; n++) {
+        update(U, p);
     }
     U.reunitarize_gauge();
 }
@@ -609,36 +629,59 @@ bool accept_polyakov(const parameters &p, const double p_old, const double p_new
 ////////////////////////////////////////////////////////////////
 
 template <typename group>
-double update_once_with_range(GaugeField<group> &U, const parameters &p, double &poly, bool relax) {
+double update_once_with_range(GaugeField<group> &U, const parameters &p, double &poly) {
 
     Field<group> Ut_old;
 
     Ut_old = U[e_t];
 
-    // spatial links always updated, t-links are conditional
-    // acc/rej separately for parities
+    std::array<int, 2 * NDIM> rnarr;
+    for (int i = 0; i < 2 * NDIM; ++i) {
+        // randomly choose a parity and a direction:
+        rnarr[i] = (int)(hila::random() * 2 * NDIM);
 
-    foralldir(d) if (d < e_t) {
-        for (Parity par : {EVEN, ODD})
-            update_parity_dir(U, p, par, d, relax);
-    }
-
-    // t-links
-    double acc = 0;
-    for (Parity par : {EVEN, ODD}) {
-        update_parity_dir(U, p, par, e_t, relax);
-
-        double p_now = measure_polyakov(U).real();
-
-        bool acc_update = accept_polyakov(p, poly, p_now);
-
-        if (acc_update) {
-            poly = p_now;
-            acc += 0.5;
-        } else {
-            U[e_t][par] = Ut_old[X]; // restore rejected
+        // randomly choose whether to do overrelaxation or heatbath update (with probabilities
+        // according to specified p.n_heatbath and p.n_overrelax):
+        if (hila::random() >= (double)p.n_heatbath / (p.n_heatbath + p.n_overrelax)) {
+            rnarr[i] += 2 * NDIM;
         }
     }
+    hila::broadcast(rnarr);
+
+    double acc = 0;
+    int nacc = 0;
+    for (int i = 0; i < 2 * NDIM; ++i) {
+        bool relax = false;
+        int tdp = rnarr[i];
+        if (tdp >= 2 * NDIM) {
+            tdp -= 2 * NDIM;
+            relax = true;
+        }
+        int tdir = tdp / 2;
+        int tpar = 1 + (tdp % 2);
+
+        Parity par = Parity(tpar);
+        // perform the selected updates:
+        update_parity_dir(U, p, par, Direction(tdir), relax);
+        if(tdir == NDIM - 1) {
+            double p_now = measure_polyakov(U).real();
+
+            bool acc_update = accept_polyakov(p, poly, p_now);
+            ++nacc;
+            if (acc_update) {
+                poly = p_now;
+                acc += 1.0;
+                Ut_old[par] = U[e_t][X];
+            } else {
+                U[e_t][par] = Ut_old[X]; // restore rejected
+            }
+        }
+    }
+
+    if(nacc > 0) {
+        acc /= nacc;
+    }
+
     return acc;
 }
 
@@ -647,25 +690,19 @@ double update_once_with_range(GaugeField<group> &U, const parameters &p, double 
 template <typename group>
 double trajectory_with_range(GaugeField<group> &U, const parameters &p, double &poly) {
 
-    double acc_or = 0;
-    double acc_hb = 0;
-
+    double acc = 0;
     double p_now = measure_polyakov(U).real();
 
-    for (int n = 0; n < p.n_update; n++) {
-        for (int i = 0; i < p.n_overrelax; i++) {
+    for (int n = 0; n < p.n_heatbath + p.n_overrelax; n++) {
 
-            // OR updates
-            acc_or += update_once_with_range(U, p, p_now, true);
-        }
+        // OR updates
+        acc += update_once_with_range(U, p, p_now);
 
-        // and then HBs
-
-        acc_hb += update_once_with_range(U, p, p_now, false);
 
         U.reunitarize_gauge();
     }
-    return (acc_or + acc_hb) / (p.n_update * (p.n_overrelax + 1));
+    return acc / (p.n_heatbath + p.n_overrelax);
+
 }
 
 /////////////////////////////////////////////////////////////////
@@ -702,7 +739,7 @@ int main(int argc, char **argv) {
     p.deltab = par.get("delta beta fraction");
     // trajectory length in steps
     p.n_overrelax = par.get("overrelax steps");
-    p.n_update = par.get("updates in trajectory");
+    p.n_heatbath = par.get("heatbath steps");
     p.n_trajectories = par.get("trajectories");
     p.n_thermal = par.get("thermalization");
 
