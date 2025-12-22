@@ -149,6 +149,31 @@ void measure_polyakov_field(const Field<T> &Ut, Field<float> &pl) {
     }
 }
 
+template <typename T, typename pT=Complex<hila::arithmetic_type<T>>>
+void measure_polyakov_field_complex(const Field<T> &Ut, Field<pT> &pl) {
+    Field<T> polyakov = Ut;
+
+    // mult links so that polyakov[X.dir == 0] contains the polyakov loop
+    for (int plane = lattice.size(e_t) - 2; plane >= 0; plane--) {
+
+        // safe_access(polyakov) pragma allows the expression below, otherwise
+        // hilapp would reject it because X and X+dir can refer to the same
+        // site on different "iterations" of the loop.  However, here this
+        // is restricted on single dir-plane so it works but we must tell it to hilapp.
+
+#pragma hila safe_access(polyakov)
+        onsites(ALL) {
+            if (X.coordinate(e_t) == plane) {
+                polyakov[X] = Ut[X] * polyakov[X + e_t];
+            }
+        }
+    }
+
+    onsites(ALL) if (X.coordinate(e_t) == 0) {
+        pl[X] = trace(polyakov[X]);
+    }
+}
+
 ////////////////////////////////////////////////////////////////////
 
 void smear_polyakov_field(Field<float> &pl, int nsmear, float smear_coeff) {
@@ -292,20 +317,20 @@ int z_ind(int z) {
 
 ///////////////////////////////////////////////////////////////////////////////////
 
-template <typename group>
+template <typename group, typename pT = Complex<hila::arithmetic_type<group>>>
 void measure_polyakov_profile(GaugeField<group> &U) {
-    Field<float> pl;
-    measure_polyakov_field(U[e_t], pl);
+    Field<pT> pl;
+    measure_polyakov_field_complex(U[e_t], pl);
 
-    ReductionVector<float> p(lattice.size(e_z));
+    ReductionVector<pT> p(lattice.size(e_z));
     p.allreduce(false);
     onsites(ALL) if (X.coordinate(e_t) == 0) {
         p[X.z()] += pl[X];
     }
 
     for (int z = 0; z < lattice.size(e_z); z++) {
-        hila::out0 << "PPOLY " << z << ' ' << p[z] / (lattice.size(e_x) * lattice.size(e_y))
-                   << '\n';
+        hila::out0 << "PPOLY " << z << ' ' << p[z].real() / (lattice.size(e_x) * lattice.size(e_y)) << ' '
+                   << p[z].imag() / (lattice.size(e_x) * lattice.size(e_y)) << '\n';
     }
 }
 
@@ -790,7 +815,7 @@ int main(int argc, char **argv) {
 
             if (p.n_profile && (trajectory + 1) % p.n_profile == 0) {
                 measure_polyakov_profile(U);
-                measure_plaq_profile(U);
+                //measure_plaq_profile(U);
             }
 
             if (p.n_dump_polyakov && (trajectory + 1) % p.n_dump_polyakov == 0) {
