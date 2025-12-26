@@ -6,6 +6,7 @@
 #include "gauge/sun_heatbath.h"
 #include "gauge/sun_overrelax.h"
 #include "checkpoint.h"
+#include "tools/string_format.h"
 
 #include <fftw3.h>
 
@@ -13,7 +14,8 @@
 #define NCOLOR 3
 #endif
 
-using mygroup = SU<NCOLOR, float>;
+using ftype = float;
+using mygroup = SU<NCOLOR, ftype>;
 
 enum class poly_limit { OFF, RANGE, PARABOLIC };
 
@@ -264,8 +266,8 @@ void measure_stuff(const GaugeField<group> &U, const parameters &p) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////////
-
-void spectraldensity_surface(std::vector<float> &surf, std::vector<double> &npow,
+template <typename sT>
+void spectraldensity_surface(std::vector<sT> &surf, std::vector<double> &npow,
                              std::vector<int> &hits) {
 
     // do fft for the surface
@@ -287,7 +289,7 @@ void spectraldensity_surface(std::vector<float> &surf, std::vector<double> &npow
     }
 
     for (int i = 0; i < area; i++) {
-        buf[i] = surf[i];
+        buf[i] = (double)surf[i];
     }
 
     fftw_execute(fftwplan);
@@ -494,8 +496,8 @@ void measure_polyakov_surface(GaugeField<group> &U, const parameters &p, int tra
 
         if (hila::myrank() == 0) {
             constexpr int pow_size = 200;
-            std::vector<double> npow(pow_size);
-            std::vector<int> hits(pow_size);
+            std::vector<double> npow(pow_size, 0);
+            std::vector<int> hits(pow_size, 0);
 
             spectraldensity_surface(surf1, npow, hits);
             spectraldensity_surface(surf2, npow, hits);
@@ -509,40 +511,307 @@ void measure_polyakov_surface(GaugeField<group> &U, const parameters &p, int tra
     }
 }
 
-
-////////////////////////////////////////////////////////////////
-
-template <typename group>
-void update(GaugeField<group> &U, const parameters &p) {
-
-    std::array<int, 2 * NDIM> rnarr;
-    for (int i = 0; i < 2 * NDIM; ++i) {
-        // randomly choose a parity and a direction:
-        rnarr[i] = (int)(hila::random() * 2 * NDIM);
-
-        // randomly choose whether to do overrelaxation or heatbath update (with probabilities
-        // according to specified p.n_heatbath and p.n_overrelax):
-        if (hila::random() >= (double)p.n_heatbath / (p.n_heatbath + p.n_overrelax)) {
-            rnarr[i] += 2 * NDIM;
-        }
+template <typename sT, typename aT = hila::arithmetic_type<sT>>
+void measure_profile(const Field<sT> &smS, Direction d, int area, std::vector<sT> &profile) {
+    ReductionVector<sT> p(lattice.size(d));
+    p.allreduce(false).delayed(true);
+    aT iarea = (aT)1.0 / (aT)area;
+    onsites(ALL) {
+        p[X.coordinate(d)] += smS[X];
     }
-    hila::broadcast(rnarr);
-
-    for (int i = 0; i < 2 * NDIM; ++i) {
-        bool relax = false;
-        int tdp = rnarr[i];
-        if (tdp >= 2 * NDIM) {
-            tdp -= 2 * NDIM;
-            relax = true;
-        }
-        int tdir = tdp / 2;
-        int tpar = 1 + (tdp % 2);
-
-        // perform the selected updates:
-        update_parity_dir(U, p, Parity(tpar), Direction(tdir), relax);
+    p.reduce();
+    profile = p.vector();
+    for (int z = 0; z < lattice.size(d); z++) {
+        profile[z] *= iarea;
     }
-
 }
+
+int z_ind(int z, Direction dz) {
+    return (z + lattice.size(dz)) % lattice.size(dz);
+}
+
+template <typename sT>
+void spectraldensity_surface(std::vector<sT> &surf, int size_x, int size_y,
+                             std::vector<double> &npow, std::vector<int> &hits) {
+
+    // do fft for the surface
+    static bool first = true;
+
+    static Complex<double> *buf;
+    static fftw_plan fftwplan;
+
+    int area = size_x * size_y;
+
+    if (first) {
+        first = false;
+
+        buf = (Complex<double> *)fftw_malloc(sizeof(Complex<double>) * area);
+
+        // note: we had x as the "fast" dimension, but fftw wants the 2nd dim to be
+        // the "fast" one. thus, first y, then x.
+        fftwplan = fftw_plan_dft_2d(size_y, size_x, (fftw_complex *)buf, (fftw_complex *)buf,
+                                    FFTW_FORWARD, FFTW_ESTIMATE);
+    }
+
+    for (int i = 0; i < area; i++) {
+        buf[i] = surf[i];
+    }
+
+    fftw_execute(fftwplan);
+
+    int pow_size = npow.size();
+
+    for (int i = 0; i < area; i++) {
+        int x = i % size_x;
+        int y = i / size_x;
+        x = (x <= size_x / 2) ? x : (size_x - x);
+        y = (y <= size_y / 2) ? y : (size_y - y);
+
+        int k = x * x + y * y;
+        if (k < pow_size) {
+            npow[k] += buf[i].squarenorm() / (area * area);
+            hits[k]++;
+        }
+    }
+}
+
+template <typename sT, typename aT>
+void measure_interface(const Field<sT> &smS, Direction dz, std::vector<aT> &surf1,
+                       std::vector<aT> &surf2, out_only int &size_x, out_only int &size_y) {
+
+    Direction dx, dy;
+    foralldir(td) if (td != dz) {
+        dx = td;
+        break;
+    }
+    foralldir(td) if (td != dz && td != dx) {
+        dy = td;
+        break;
+    }
+
+    size_x = lattice.size(dx);
+    size_y = lattice.size(dy);
+
+    int area = size_x * size_y;
+
+    if (hila::myrank() == 0) {
+        surf1.resize(area);
+        surf2.resize(area);
+    }
+
+    std::vector<aT> profile;
+    measure_profile(smS, dz, area, profile);
+
+    aT minp = 1.0e8, maxp = -1.0e8;
+    int minloc = 0, maxloc = 0;
+    for (int i = 0; i < profile.size(); i++) {
+        if (minp > profile[i]) {
+            minp = profile[i];
+            minloc = i;
+        }
+        if (maxp < profile[i]) {
+            maxp = profile[i];
+            maxloc = i;
+        }
+    }
+
+
+    aT surface_level = 0.5 * (aT)(std::round(minp) + std::round(maxp));
+
+
+    int startloc, startloc2;
+    if (maxloc > minloc)
+        startloc = (maxloc + minloc) / 2;
+    else
+        startloc = ((maxloc + minloc + lattice.size(dz)) / 2) % lattice.size(dz);
+
+    // starting positio for the other surface
+    startloc2 = z_ind(startloc + lattice.size(dz) / 2);
+
+    std::vector<sT> lsmS;
+    std::vector<sT> line(lattice.size(dz));
+
+
+    CoordinateVector yslice;
+    foralldir(td) {
+        yslice[td] = -1;
+    }
+    for (int y = 0; y < size_y; ++y) {
+        yslice[dy] = y;
+        lsmS = smS.get_slice(yslice);
+        if (hila::myrank() == 0) {
+            for (int x = 0; x < size_x; ++x) {
+
+                for (int z = 0; z < lattice.size(dz); z++) {
+                    line[z] = lsmS[x + size_x * z];
+                }
+
+                // start search of the surface from the center between min and max
+                int z = startloc;
+
+                while (line[z_ind(z, dz)] > surface_level && startloc - z < lattice.size(dz) * 0.4)
+                    z--;
+
+                while (line[z_ind(z + 1, dz)] <= surface_level &&
+                       z - startloc < lattice.size(dz) * 0.4)
+                    z++;
+
+                // do linear interpolation
+                surf1[x + y * lattice.size(dx)] =
+                    z + (surface_level - line[z_ind(z, dz)]) / (line[z_ind(z + 1, dz)] - line[z_ind(z, dz)]);
+
+
+                // and locate the other surface - start from Lz/2 offset
+                z = startloc2;
+
+                while (line[z_ind(z, dz)] <= surface_level && startloc2 - z < lattice.size(dz) * 0.4)
+                    z--;
+
+                while (line[z_ind(z + 1, dz)] > surface_level &&
+                       z - startloc2 < lattice.size(dz) * 0.4)
+                    z++;
+
+                // do linear interpolation
+                surf2[x + y * lattice.size(dx)] =
+                    z + (surface_level - line[z_ind(z, dz)]) / (line[z_ind(z + 1, dz)] - line[z_ind(z, dz)]);
+                
+            }
+        }
+    }
+}
+
+
+template <typename sT>
+void measure_interface_spectrum(Field<sT> &smS, Direction dir_z, int nsm, int64_t idump,
+                                parameters &p, bool first_pow) {
+    std::vector<sT> surf1, surf2;
+    int size_x, size_y;
+    measure_interface(smS, dir_z, surf1, surf2, size_x, size_y);
+    if (hila::myrank() == 0) {
+        if (false) {
+            for (int x = 0; x < size_x; ++x) {
+                for (int y = 0; y < size_y; ++y) {
+                    hila::out0 << "SURF" << nsm << ' ' << x << ' ' << y << ' '
+                               << surf1[x + y * size_x] << '\n';
+                }
+            }
+        }
+        constexpr int pow_size = 200;
+        std::vector<double> npow(pow_size, 0);
+        std::vector<int> hits(pow_size, 0);
+        spectraldensity_surface(surf1, size_x, size_y, npow, hits);
+        spectraldensity_surface(surf2, size_x, size_y, npow, hits);
+
+        std::string prof_file = string_format("profile_nsm%04d", nsm);
+        std::ofstream prof_os;
+
+        if (first_pow) {
+            int64_t npowmeas = 0;
+            for (int ipow = 0; ipow < pow_size; ++ipow) {
+                if (hits[ipow] > 0) {
+                    ++npowmeas;
+                }
+            }
+
+            if (filesys_ns::exists(prof_file)) {
+                std::string prof_file_temp = prof_file + "_temp";
+                filesys_ns::rename(prof_file, prof_file_temp);
+                std::ifstream ifile;
+                ifile.open(prof_file_temp, std::ios::in | std::ios::binary);
+                prof_os.open(prof_file, std::ios::out | std::ios::binary);
+
+                int64_t *ibuff = (int64_t *)memalloc((NDIM + 5) * sizeof(int64_t));
+                ifile.read((char *)ibuff, (NDIM + 5) * sizeof(int64_t));
+                prof_os.write((char *)ibuff, (NDIM + 5) * sizeof(int64_t));
+                int64_t tnpowmeas = ibuff[NDIM + 2];
+                double *buffer = nullptr;
+                if (tnpowmeas > npowmeas) {
+                    buffer = (double *)memalloc(tnpowmeas * sizeof(double));
+                } else {
+                    buffer = (double *)memalloc(npowmeas * sizeof(double));
+                    for (int tib = tnpowmeas; tib < npowmeas; ++tib) {
+                        buffer[tib] = 0;
+                    }
+                }
+                ifile.read((char *)buffer, 2 * sizeof(double));
+                prof_os.write((char *)buffer, 2 * sizeof(double));
+
+                ifile.read((char *)buffer, tnpowmeas * sizeof(double));
+
+                npowmeas = 0;
+                for (int ipow = 0; ipow < pow_size; ++ipow) {
+                    if (hits[ipow] > 0) {
+                        buffer[npowmeas] = (double)ipow;
+                        ++npowmeas;
+                    }
+                }
+                prof_os.write((char *)buffer, npowmeas * sizeof(double));
+
+                while (ifile.good()) {
+                    ifile.read((char *)ibuff, sizeof(int64_t));
+                    int64_t tidump = ibuff[0];
+                    ifile.read((char *)buffer, tnpowmeas * sizeof(double));
+                    if (ifile.good() && tidump < idump) {
+                        prof_os.write((char *)&(tidump), sizeof(int64_t));
+                        prof_os.write((char *)buffer, npowmeas * sizeof(double));
+                    } else {
+                        break;
+                    }
+                }
+                ifile.close();
+                prof_os.close();
+                free(buffer);
+                free(ibuff);
+                filesys_ns::remove(prof_file_temp);
+            } else {
+                prof_os.open(prof_file, std::ios::out | std::ios::binary);
+                int64_t *ibuff = (int64_t *)memalloc((NDIM + 5) * sizeof(int64_t));
+                ibuff[0] = NCOLOR;
+                ibuff[1] = NDIM;
+                foralldir(d) {
+                    ibuff[2 + (int)d] = lattice.size(d);
+                }
+                ibuff[NDIM + 2] = npowmeas;
+                ibuff[NDIM + 3] = nsm;
+                ibuff[NDIM + 4] = sizeof(double);
+                prof_os.write((char *)ibuff, (NDIM + 5) * sizeof(int64_t));
+                double tval = p.beta;
+                prof_os.write((char *)&(tval), sizeof(double));
+                tval = p.smear_coeff;
+                prof_os.write((char *)&(tval), sizeof(double));
+
+                double *buffer = (double *)memalloc(npowmeas * sizeof(double));
+                for (int tib = npowmeas; tib < npowmeas; ++tib) {
+                    buffer[tib] = 0;
+                }
+                npowmeas = 0;
+                for (int ipow = 0; ipow < pow_size; ++ipow) {
+                    if (hits[ipow] > 0) {
+                        buffer[npowmeas] = (double)ipow;
+                        ++npowmeas;
+                    }
+                }
+                prof_os.write((char *)buffer, npowmeas * sizeof(double));
+
+                prof_os.close();
+                free(buffer);
+                free(ibuff);
+            }
+        }
+
+        prof_os.open(prof_file, std::ios::out | std::ios_base::app | std::ios::binary);
+
+        prof_os.write((char *)&(idump), sizeof(int64_t));
+        for (int ipow = 0; ipow < pow_size; ++ipow) {
+            if (hits[ipow] > 0) {
+                double tval = npow[ipow] / hits[ipow];
+                prof_os.write((char *)&(tval), sizeof(double));
+            }
+        }
+        prof_os.close();
+    }
+}
+
 
 ////////////////////////////////////////////////////////////////
 
@@ -582,6 +851,41 @@ void update_parity_dir(GaugeField<group> &U, const parameters &p, Parity par, Di
             suN_heatbath(U[d][X], staples[X], p.beta);
         }
         hb_timer.stop();
+    }
+}
+
+
+////////////////////////////////////////////////////////////////
+
+
+template <typename group>
+void update(GaugeField<group> &U, const parameters &p) {
+
+    std::array<int, 2 * NDIM> rnarr;
+    for (int i = 0; i < 2 * NDIM; ++i) {
+        // randomly choose a parity and a direction:
+        rnarr[i] = (int)(hila::random() * 2 * NDIM);
+
+        // randomly choose whether to do overrelaxation or heatbath update (with probabilities
+        // according to specified p.n_heatbath and p.n_overrelax):
+        if (hila::random() >= (double)p.n_heatbath / (p.n_heatbath + p.n_overrelax)) {
+            rnarr[i] += 2 * NDIM;
+        }
+    }
+    hila::broadcast(rnarr);
+
+    for (int i = 0; i < 2 * NDIM; ++i) {
+        bool relax = false;
+        int tdp = rnarr[i];
+        if (tdp >= 2 * NDIM) {
+            tdp -= 2 * NDIM;
+            relax = true;
+        }
+        int tdir = tdp / 2;
+        int tpar = 1 + (tdp % 2);
+
+        // perform the selected updates:
+        update_parity_dir(U, p, Parity(tpar), Direction(tdir), relax);
     }
 }
 
@@ -820,6 +1124,7 @@ int main(int argc, char **argv) {
 
     double p_now = measure_polyakov(U).real();
 
+    bool first_pow = true;
     bool run = true;
     for (int trajectory = start_traj; run && trajectory < p.n_trajectories; trajectory++) {
 
@@ -847,7 +1152,22 @@ int main(int argc, char **argv) {
             measure_stuff(U, p);
 
             if (p.n_surf_spec && (trajectory + 1) % p.n_surf_spec == 0) {
-                measure_polyakov_surface(U, p, trajectory);
+                //measure_polyakov_surface(U, p, trajectory);
+                int64_t idump = (trajectory + 1) / p.n_surf_spec;
+
+                Field<float> smS;
+
+                measure_polyakov_field(U[e_t], smS);
+
+                int n_smear = 0;
+
+                for (int ism = 0; ism < p.n_smear.size(); ++ism) {
+                    int smear = p.n_smear[ism];
+                    smear_polyakov_field(smS, smear - n_smear, p.smear_coeff);
+                    n_smear = smear;
+                    measure_interface_spectrum(smS, e_z, n_smear, idump, p, first_pow);
+                }
+                first_pow = false;
             }
 
             if (p.n_profile && (trajectory + 1) % p.n_profile == 0) {

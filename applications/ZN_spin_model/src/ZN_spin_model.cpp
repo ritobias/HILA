@@ -430,8 +430,8 @@ void measure_interface_spectrum(Field<sT> &smS, Direction dir_z, int bds_shift, 
             }
         }
         constexpr int pow_size = 200;
-        std::vector<double> npow(pow_size);
-        std::vector<int> hits(pow_size);
+        std::vector<double> npow(pow_size, 0);
+        std::vector<int> hits(pow_size, 0);
         spectraldensity_surface(surf, size_x, size_y, npow, hits);
 
         std::string prof_file = string_format("profile_nsm%04d", nsm);

@@ -12,7 +12,7 @@ traj/saved             500
 config name            config
 polyakov potential     range 0.16,0.245
 updates/profile meas   100
-updates/surf spec meas off
+updates/surf spec meas 2
 smearing steps         20,40,50,60,70,80
 smear coefficient      0.9
 z smearing steps       10,10,10,10,10,10
