@@ -616,7 +616,7 @@ void measure_interface(const Field<sT> &smS, Direction dz, std::vector<aT> &surf
     }
 
 
-    aT surface_level = 0.5 * (aT)(std::round(minp) + std::round(maxp));
+    aT surface_level = maxp * 0.5;
 
 
     int startloc, startloc2;
@@ -1155,7 +1155,7 @@ int main(int argc, char **argv) {
                 //measure_polyakov_surface(U, p, trajectory);
                 int64_t idump = (trajectory + 1) / p.n_surf_spec;
 
-                Field<float> smS;
+                Field<float> smS, tsmS, tsmS2;
 
                 measure_polyakov_field(U[e_t], smS);
 
@@ -1165,7 +1165,18 @@ int main(int argc, char **argv) {
                     int smear = p.n_smear[ism];
                     smear_polyakov_field(smS, smear - n_smear, p.smear_coeff);
                     n_smear = smear;
-                    measure_interface_spectrum(smS, e_z, n_smear, idump, p, first_pow);
+                    tsmS = smS;
+                    if (p.z_smear[ism] > 0) {
+                        for (int j = 0; j < p.z_smear[ism]; j++) {
+                            onsites(ALL) if (X.coordinate(e_t) == 0) {
+                                tsmS2[X] = tsmS[X] + p.smear_coeff * (tsmS[X + e_z] + tsmS[X - e_z]);
+                            }
+                            onsites(ALL) if (X.coordinate(e_t) == 0) {
+                                tsmS[X] = tsmS2[X] / (1 + 2 * p.smear_coeff);
+                            }
+                        }
+                    }
+                    measure_interface_spectrum(tsmS, e_z, n_smear, idump, p, first_pow);
                 }
                 first_pow = false;
             }
