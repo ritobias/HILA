@@ -7,7 +7,6 @@
 #include "gauge/sun_overrelax.h"
 #include "checkpoint.h"
 #include "tools/string_format.h"
-
 #include <fftw3.h>
 
 #ifndef NCOLOR
@@ -576,7 +575,7 @@ void spectraldensity_surface(std::vector<sT> &surf, int size_x, int size_y,
 }
 
 template <typename sT, typename aT>
-void measure_interface(const Field<sT> &smS, Direction dz, std::vector<aT> &surf1,
+bool measure_interface(const Field<sT> &smS, Direction dz, aT surface_level, std::vector<aT> &surf1,
                        std::vector<aT> &surf2, out_only int &size_x, out_only int &size_y) {
 
     Direction dx, dy;
@@ -599,6 +598,8 @@ void measure_interface(const Field<sT> &smS, Direction dz, std::vector<aT> &surf
         surf2.resize(area);
     }
 
+
+    /*
     std::vector<aT> profile;
     measure_profile(smS, dz, area, profile);
 
@@ -615,78 +616,118 @@ void measure_interface(const Field<sT> &smS, Direction dz, std::vector<aT> &surf
         }
     }
 
+    if (hila::myrank() == 0) {
+        std::stable_sort(profile.begin(), profile.end());
+        int pmaxindex = 0.9 * profile.size();
+        int pminindex = 0.1 * profile.size();
+        maxp = profile[pmaxindex];
+        minp = profile[pminindex];
+    }
+
+    hila::broadcast(maxp);
+    hila::broadcast(minp);
 
     aT surface_level = maxp * 0.5;
+    */
 
-
-    int startloc, startloc2;
-    if (maxloc > minloc)
-        startloc = (maxloc + minloc) / 2;
-    else
-        startloc = ((maxloc + minloc + lattice.size(dz)) / 2) % lattice.size(dz);
-
-    // starting positio for the other surface
-    startloc2 = z_ind(startloc + lattice.size(dz) / 2);
-
-    std::vector<sT> lsmS;
     std::vector<sT> line(lattice.size(dz));
+    measure_profile(smS, dz, area, line);
 
+    int startloc = lattice.size(dz) / 2;
+    while (line[z_ind(startloc, dz)] > surface_level && startloc > -0.5 * lattice.size(dz))
+        startloc--;
+    while (line[z_ind(startloc + 1, dz)] <= surface_level && startloc < 1.5 * lattice.size(dz))
+        startloc++;
+    startloc = z_ind(startloc, dz);
 
-    CoordinateVector yslice;
-    foralldir(td) {
-        yslice[td] = -1;
+    int startloc2 = startloc + 1;
+    while (line[z_ind(startloc2 + 1, dz)] > surface_level &&
+           startloc2 < startloc + lattice.size(dz))
+        startloc2++;
+    startloc2 = z_ind(startloc2, dz);
+
+    int dsloc = startloc2 - startloc;
+    if (dsloc > lattice.size(dz) / 2) {
+        dsloc -= lattice.size(dz);
     }
-    for (int y = 0; y < size_y; ++y) {
-        yslice[dy] = y;
-        lsmS = smS.get_slice(yslice);
-        if (hila::myrank() == 0) {
-            for (int x = 0; x < size_x; ++x) {
+    if (dsloc <= -lattice.size(dz) / 2) {
+        dsloc += lattice.size(dz);
+    }
 
-                for (int z = 0; z < lattice.size(dz); z++) {
-                    line[z] = lsmS[x + size_x * z];
+    hila::out0 << "startloc=" << startloc << ", startloc2=" << startloc2 << ", dsloc=" << dsloc << '\n';
+
+    if(abs(dsloc) > lattice.size(dz)/4) {
+        std::vector<sT> lsmS;
+        CoordinateVector yslice;
+        foralldir(td) {
+            yslice[td] = -1;
+        }
+        for (int y = 0; y < size_y; ++y) {
+            yslice[dy] = y;
+            lsmS = smS.get_slice(yslice);
+            if (hila::myrank() == 0) {
+                for (int x = 0; x < size_x; ++x) {
+
+                    for (int z = 0; z < lattice.size(dz); z++) {
+                        line[z] = lsmS[x + size_x * z];
+                    }
+
+                    // start search of the surface from the center between min and max
+                    int z = startloc;
+
+                    while (line[z_ind(z, dz)] > surface_level &&
+                           startloc - z < lattice.size(dz) * 0.4)
+                        z--;
+
+                    while (line[z_ind(z + 1, dz)] <= surface_level &&
+                           z - startloc < lattice.size(dz) * 0.4)
+                        z++;
+
+                    // do linear interpolation
+                    surf1[x + y * lattice.size(dx)] =
+                        z + (surface_level - line[z_ind(z, dz)]) /
+                                (line[z_ind(z + 1, dz)] - line[z_ind(z, dz)]);
+
+
+                    // and locate the other surface
+                    z = startloc2;
+
+                    while (line[z_ind(z, dz)] <= surface_level &&
+                           startloc2 - z < lattice.size(dz) * 0.4)
+                        z--;
+
+                    while (line[z_ind(z + 1, dz)] > surface_level &&
+                           z - startloc2 < lattice.size(dz) * 0.4)
+                        z++;
+
+                    // do linear interpolation
+                    surf2[x + y * lattice.size(dx)] =
+                        z + (surface_level - line[z_ind(z, dz)]) /
+                                (line[z_ind(z + 1, dz)] - line[z_ind(z, dz)]);
                 }
-
-                // start search of the surface from the center between min and max
-                int z = startloc;
-
-                while (line[z_ind(z, dz)] > surface_level && startloc - z < lattice.size(dz) * 0.4)
-                    z--;
-
-                while (line[z_ind(z + 1, dz)] <= surface_level &&
-                       z - startloc < lattice.size(dz) * 0.4)
-                    z++;
-
-                // do linear interpolation
-                surf1[x + y * lattice.size(dx)] =
-                    z + (surface_level - line[z_ind(z, dz)]) / (line[z_ind(z + 1, dz)] - line[z_ind(z, dz)]);
-
-
-                // and locate the other surface - start from Lz/2 offset
-                z = startloc2;
-
-                while (line[z_ind(z, dz)] <= surface_level && startloc2 - z < lattice.size(dz) * 0.4)
-                    z--;
-
-                while (line[z_ind(z + 1, dz)] > surface_level &&
-                       z - startloc2 < lattice.size(dz) * 0.4)
-                    z++;
-
-                // do linear interpolation
-                surf2[x + y * lattice.size(dx)] =
-                    z + (surface_level - line[z_ind(z, dz)]) / (line[z_ind(z + 1, dz)] - line[z_ind(z, dz)]);
-                
             }
         }
+        return true;
+    } else {
+        if (hila::myrank() == 0) {
+            for (int i = 0; i < area; ++i) {
+                surf1[i] = 0;
+                surf2[i] = 0;
+            }
+        }
+        return false;
     }
 }
 
 
-template <typename sT>
-void measure_interface_spectrum(Field<sT> &smS, Direction dir_z, int nsm, int64_t idump,
+template <typename sT, typename aT = hila::arithmetic_type<sT>>
+bool measure_interface_spectrum(Field<sT> &smS, Direction dir_z, aT surface_level, int nsm, int64_t idump,
                                 parameters &p, bool first_pow) {
     std::vector<sT> surf1, surf2;
     int size_x, size_y;
-    measure_interface(smS, dir_z, surf1, surf2, size_x, size_y);
+    hila::out0 << "Surface_level" << nsm << ' ' << surface_level << '\n';
+    bool ok = measure_interface(smS, dir_z, surface_level, surf1, surf2, size_x, size_y);
+
     if (hila::myrank() == 0) {
         if (false) {
             for (int x = 0; x < size_x; ++x) {
@@ -699,8 +740,10 @@ void measure_interface_spectrum(Field<sT> &smS, Direction dir_z, int nsm, int64_
         constexpr int pow_size = 200;
         std::vector<double> npow(pow_size, 0);
         std::vector<int> hits(pow_size, 0);
-        spectraldensity_surface(surf1, size_x, size_y, npow, hits);
-        spectraldensity_surface(surf2, size_x, size_y, npow, hits);
+        if(ok) {
+            spectraldensity_surface(surf1, size_x, size_y, npow, hits);
+            spectraldensity_surface(surf2, size_x, size_y, npow, hits);
+        }
 
         std::string prof_file = string_format("profile_nsm%04d", nsm);
         std::ofstream prof_os;
@@ -799,17 +842,20 @@ void measure_interface_spectrum(Field<sT> &smS, Direction dir_z, int nsm, int64_
             }
         }
 
-        prof_os.open(prof_file, std::ios::out | std::ios_base::app | std::ios::binary);
+        if(ok) {
+            prof_os.open(prof_file, std::ios::out | std::ios_base::app | std::ios::binary);
 
-        prof_os.write((char *)&(idump), sizeof(int64_t));
-        for (int ipow = 0; ipow < pow_size; ++ipow) {
-            if (hits[ipow] > 0) {
-                double tval = npow[ipow] / hits[ipow];
-                prof_os.write((char *)&(tval), sizeof(double));
+            prof_os.write((char *)&(idump), sizeof(int64_t));
+            for (int ipow = 0; ipow < pow_size; ++ipow) {
+                if (hits[ipow] > 0) {
+                    double tval = npow[ipow] / hits[ipow];
+                    prof_os.write((char *)&(tval), sizeof(double));
+                }
             }
+            prof_os.close();
         }
-        prof_os.close();
     }
+    return true;
 }
 
 
@@ -1159,6 +1205,11 @@ int main(int argc, char **argv) {
 
                 measure_polyakov_field(U[e_t], smS);
 
+                ftype surface_level = 0.5 * p_now;
+                if (p.polyakov_pot == poly_limit::RANGE) {
+                    surface_level = 0.5 * (p.poly_min + p.poly_max);
+                }
+
                 int n_smear = 0;
 
                 for (int ism = 0; ism < p.n_smear.size(); ++ism) {
@@ -1176,7 +1227,7 @@ int main(int argc, char **argv) {
                             }
                         }
                     }
-                    measure_interface_spectrum(tsmS, e_z, n_smear, idump, p, first_pow);
+                    measure_interface_spectrum(tsmS, e_z, surface_level, n_smear, idump, p, first_pow);
                 }
                 first_pow = false;
             }
