@@ -2,15 +2,15 @@
 
 lattice size           16,16,64,6
 beta                   17.110849819
-delta beta fraction    0.05
+delta beta fraction    0.01
 overrelax steps        5
 heatbath steps         5
 trajectories           100000
-thermalization         0
+thermalization         20
 random seed            0
 traj/saved             500
 config name            config
-polyakov potential     range 0.16,0.245
+polyakov potential     range 0.18,0.22
 updates/profile meas   100
 updates/surf spec meas 2
 smearing steps         20,40,50,60,70,80

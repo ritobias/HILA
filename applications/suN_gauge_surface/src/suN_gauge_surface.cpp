@@ -177,10 +177,11 @@ void measure_polyakov_field_complex(const Field<T> &Ut, Field<pT> &pl) {
 
 ////////////////////////////////////////////////////////////////////
 
-void smear_polyakov_field(Field<float> &pl, int nsmear, float smear_coeff) {
+template <typename T, typename aT>
+void smear_polyakov_field(Field<T> &pl, int nsmear, aT smear_coeff) {
 
     if (nsmear > 0) {
-        Field<float> pl2 = 0;
+        Field<T> pl2 = 0;
 
         for (int i = 0; i < nsmear; i++) {
             onsites(ALL) if (X.coordinate(e_t) == 0) {
@@ -197,8 +198,9 @@ void smear_polyakov_field(Field<float> &pl, int nsmear, float smear_coeff) {
 
 /////////////////////////////////////////////////////////////////////////////
 
-std::vector<float> measure_polyakov_profile(Field<float> &pl, std::vector<float> &pro1) {
-    ReductionVector<float> p(lattice.size(e_z)), p1(lattice.size(e_z));
+template <typename T, typename aT>
+std::vector<aT> measure_polyakov_profile(Field<T> &pl, std::vector<aT> &pro1) {
+    ReductionVector<aT> p(lattice.size(e_z)), p1(lattice.size(e_z));
     p.allreduce(false);
     p1.allreduce(false);
     onsites(ALL) if (X.coordinate(e_t) == 0) {
@@ -515,7 +517,7 @@ void measure_profile(const Field<sT> &smS, Direction d, int area, std::vector<sT
     ReductionVector<sT> p(lattice.size(d));
     p.allreduce(false).delayed(true);
     aT iarea = (aT)1.0 / (aT)area;
-    onsites(ALL) {
+    onsites(ALL) if (X.coordinate(e_t) == 0) {
         p[X.coordinate(d)] += smS[X];
     }
     p.reduce();
@@ -634,17 +636,25 @@ bool measure_interface(const Field<sT> &smS, Direction dz, aT surface_level, std
     measure_profile(smS, dz, area, line);
 
     int startloc = lattice.size(dz) / 2;
-    while (line[z_ind(startloc, dz)] > surface_level && startloc > -0.5 * lattice.size(dz))
-        startloc--;
-    while (line[z_ind(startloc + 1, dz)] <= surface_level && startloc < 1.5 * lattice.size(dz))
-        startloc++;
-    startloc = z_ind(startloc, dz);
-
     int startloc2 = startloc + 1;
-    while (line[z_ind(startloc2 + 1, dz)] > surface_level &&
-           startloc2 < startloc + lattice.size(dz))
-        startloc2++;
-    startloc2 = z_ind(startloc2, dz);
+
+    if (hila::myrank() == 0) {
+        while (line[z_ind(startloc, dz)] > surface_level && startloc > -0.5 * lattice.size(dz))
+            startloc--;
+        while (line[z_ind(startloc + 1, dz)] <= surface_level && startloc < 1.5 * lattice.size(dz))
+            startloc++;
+        startloc = z_ind(startloc, dz);
+
+
+        startloc2 = startloc + 1;
+        while (line[z_ind(startloc2 + 1, dz)] > surface_level &&
+            startloc2 < startloc + lattice.size(dz))
+            startloc2++;
+        startloc2 = z_ind(startloc2, dz);
+    }
+    
+    hila::broadcast(startloc);
+    hila::broadcast(startloc2);
 
     int dsloc = startloc2 - startloc;
     if (dsloc > lattice.size(dz) / 2) {
@@ -660,21 +670,24 @@ bool measure_interface(const Field<sT> &smS, Direction dz, aT surface_level, std
         std::vector<sT> lsmS;
         CoordinateVector yslice;
         foralldir(td) {
-            yslice[td] = -1;
+            if(td < e_t) {
+                yslice[td] = -1;
+            } else {
+                yslice[td] = 0;
+            }
         }
         for (int y = 0; y < size_y; ++y) {
             yslice[dy] = y;
             lsmS = smS.get_slice(yslice);
             if (hila::myrank() == 0) {
                 for (int x = 0; x < size_x; ++x) {
-
-                    for (int z = 0; z < lattice.size(dz); z++) {
+                    
+                    for (int z = 0; z < lattice.size(dz); ++z) {
                         line[z] = lsmS[x + size_x * z];
                     }
 
                     // start search of the surface from the center between min and max
                     int z = startloc;
-
                     while (line[z_ind(z, dz)] > surface_level &&
                            startloc - z < lattice.size(dz) * 0.4)
                         z--;
@@ -691,7 +704,6 @@ bool measure_interface(const Field<sT> &smS, Direction dz, aT surface_level, std
 
                     // and locate the other surface
                     z = startloc2;
-
                     while (line[z_ind(z, dz)] <= surface_level &&
                            startloc2 - z < lattice.size(dz) * 0.4)
                         z--;
@@ -1203,22 +1215,26 @@ int main(int argc, char **argv) {
         update_timer.stop();
 
         // trajectory is negative during thermalization
+        measure_timer.start();
+
+        hila::out0 << "Measure_start " << trajectory << '\n';
+
+        if (p.polyakov_pot != poly_limit::OFF) {
+            hila::out0 << "ACCP " << acc << '\n';
+        }
+
+        measure_stuff(U, p);
+
         if (trajectory >= 0) {
-            measure_timer.start();
-
-            hila::out0 << "Measure_start " << trajectory << '\n';
-
-            measure_stuff(U, p);
-
             if (p.n_surf_spec && (trajectory + 1) % p.n_surf_spec == 0) {
                 //measure_polyakov_surface(U, p, trajectory);
                 int64_t idump = (trajectory + 1) / p.n_surf_spec;
 
-                Field<float> smS, tsmS, tsmS2;
+                Field<ftype> smS, tsmS, tsmS2;
 
                 measure_polyakov_field(U[e_t], smS);
 
-                ftype surface_level = 0.5 * p_now;
+                ftype surface_level = p_now;
                 if (p.polyakov_pot == poly_limit::RANGE) {
                     surface_level = 0.5 * (p.poly_min + p.poly_max);
                 }
@@ -1245,11 +1261,6 @@ int main(int argc, char **argv) {
                 first_pow = false;
             }
 
-            if (p.n_profile && (trajectory + 1) % p.n_profile == 0) {
-                measure_polyakov_profile(U);
-                //measure_plaq_profile(U);
-            }
-
             if (p.n_dump_polyakov && (trajectory + 1) % p.n_dump_polyakov == 0) {
                 Field<float> pl;
                 std::ofstream poly;
@@ -1259,15 +1270,17 @@ int main(int argc, char **argv) {
                 measure_polyakov_field(U[e_t], pl);
                 pl.write_slice(poly, {-1, -1, -1, 0});
             }
-
-            if (p.polyakov_pot != poly_limit::OFF) {
-                hila::out0 << "ACCP " << acc << '\n';
-            }
-
-            hila::out0 << "Measure_end " << trajectory << " time " << hila::gettime() << std::endl;
-
-            measure_timer.stop();
         }
+
+        if (p.n_profile && (trajectory + 1) % p.n_profile == 0) {
+            measure_polyakov_profile(U);
+            //measure_plaq_profile(U);
+        }
+
+        hila::out0 << "Measure_end " << trajectory << " time " << hila::gettime() << std::endl;
+
+        measure_timer.stop();
+        
 
         run = !hila::time_to_finish();
         if (!run || (p.n_save > 0 && (trajectory + 1) % p.n_save == 0)) {
