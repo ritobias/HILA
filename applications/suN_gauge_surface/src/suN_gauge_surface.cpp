@@ -743,6 +743,19 @@ bool measure_interface_spectrum(Field<sT> &smS, Direction dir_z, aT surface_leve
         if(ok) {
             spectraldensity_surface(surf1, size_x, size_y, npow, hits);
             spectraldensity_surface(surf2, size_x, size_y, npow, hits);
+        } else {
+            int area = size_x * size_y;
+            for (int i = 0; i < area; i++) {
+                int x = i % size_x;
+                int y = i / size_x;
+                x = (x <= size_x / 2) ? x : (size_x - x);
+                y = (y <= size_y / 2) ? y : (size_y - y);
+
+                int k = x * x + y * y;
+                if (k < pow_size) {
+                    hits[k]++;
+                }
+            }
         }
 
         std::string prof_file = string_format("profile_nsm%04d", nsm);
