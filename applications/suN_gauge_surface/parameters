@@ -2,7 +2,7 @@
 
 lattice size           16,16,64,6
 beta                   17.110849819
-delta beta fraction    0.01
+delta beta fraction    0
 overrelax steps        5
 heatbath steps         5
 trajectories           100000
