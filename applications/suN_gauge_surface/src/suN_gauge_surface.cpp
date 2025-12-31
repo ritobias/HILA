@@ -742,29 +742,32 @@ double polyakov_potential(const parameters &p, const double poly) {
 
 ////////////////////////////////////////////////////////////////
 
-bool accept_polyakov(const parameters &p, const double p_old, const double p_new) {
+bool accept_polyakov_pot(const parameters &p, const double p_now, const double p_new) {
 
-    if (p.polyakov_pot == poly_limit::PARABOLIC) {
-        double dpot = polyakov_potential(p, p_new) - polyakov_potential(p, p_old);
+    double dpot = polyakov_potential(p, p_new) - polyakov_potential(p, p_now);
 
-        bool accept = hila::broadcast(hila::random() < exp(-dpot));
+    bool accept = hila::broadcast(hila::random() < exp(-dpot));
 
-        return accept;
-    } else {
-        if (p_new >= p.poly_min && p_new <= p.poly_max)
-            return true;
-        if (p_new > p.poly_max && p_new < p_old)
-            return true;
-        if (p_new < p.poly_min && p_new > p_old)
-            return true;
-        return false;
-    }
+    return accept;
+}
+
+bool accept_polyakov_range(const parameters &p, const double p_old, const double p_new) {
+
+    if (p_new >= p.poly_min && p_new <= p.poly_max)
+        return true;
+    if (p_new > p.poly_max && p_new <= p_old)
+        return true;
+    if (p_new < p.poly_min && p_new >= p_old)
+        return true;
+    
+    return false;
 }
 
 ////////////////////////////////////////////////////////////////
 
 template <typename group>
-double update_once_with_range(GaugeField<group> &U, const parameters &p, double &poly) {
+double update_once_with_range(GaugeField<group> &U, const parameters &p, double &p_now,
+                              double &p_prev) {
 
     Field<group> Ut_old;
 
@@ -799,12 +802,18 @@ double update_once_with_range(GaugeField<group> &U, const parameters &p, double 
         // perform the selected updates:
         update_parity_dir(U, p, par, Direction(tdir), relax);
         if(tdir == NDIM - 1) {
-            double p_now = measure_polyakov(U).real();
+            double p_new = measure_polyakov(U).real();
 
-            bool acc_update = accept_polyakov(p, poly, p_now);
+            bool acc_update;
+            if (p.polyakov_pot == poly_limit::PARABOLIC) {
+                acc_update = accept_polyakov_pot(p, p_now, p_new);
+            } else {
+                acc_update = accept_polyakov_range(p, p_prev, p_new);
+            }
             ++nacc;
             if (acc_update) {
-                poly = p_now;
+                p_prev = p_now;
+                p_now = p_new;
                 acc += 1.0;
                 Ut_old[par] = U[e_t][X];
             } else {
@@ -823,21 +832,17 @@ double update_once_with_range(GaugeField<group> &U, const parameters &p, double 
 ////////////////////////////////////////////////////////////////
 
 template <typename group>
-double trajectory_with_range(GaugeField<group> &U, const parameters &p, double &poly) {
+double trajectory_with_range(GaugeField<group> &U, const parameters &p, double &p_now,
+                             double &p_prev) {
 
     double acc = 0;
-    double p_now = measure_polyakov(U).real();
-
     for (int n = 0; n < p.n_heatbath + p.n_overrelax; n++) {
 
-        // OR updates
-        acc += update_once_with_range(U, p, p_now);
-
+        acc += update_once_with_range(U, p, p_now, p_prev);
 
         U.reunitarize_gauge();
     }
     return acc / (p.n_heatbath + p.n_overrelax);
-
 }
 
 /////////////////////////////////////////////////////////////////
@@ -953,6 +958,7 @@ int main(int argc, char **argv) {
     if (!hila::is_rng_seeded())
         hila::seed_random(seed);
 
+    double p_prev = (double)NCOLOR;
     double p_now = measure_polyakov(U).real();
 
     bool first_pow = true;
@@ -965,7 +971,7 @@ int main(int argc, char **argv) {
 
         double acc = 0;
         if (p.polyakov_pot != poly_limit::OFF) {
-            acc += trajectory_with_range(U, p, p_now);
+            acc += trajectory_with_range(U, p, p_now, p_prev);
         } else {
             do_trajectory(U, p);
         }
