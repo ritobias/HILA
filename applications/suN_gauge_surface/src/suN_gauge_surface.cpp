@@ -398,16 +398,35 @@ bool measure_interface(const Field<sT> &smS, Direction dz, pT surface_level, std
     hila::broadcast(startloc2);
 
     int dsloc = startloc2 - startloc1;
-    if (dsloc > lattice.size(dz) / 2) {
-        dsloc -= lattice.size(dz);
-    }
-    if (dsloc <= -lattice.size(dz) / 2) {
+    if(startloc2 <= startloc1) {
         dsloc += lattice.size(dz);
     }
-    hila::out0 << string_format("sloc1=% 4d, sloc2=% 4d, dsloc=% 4d\n", startloc1, startloc2,
-                                dsloc);
+    int sloff1 = dsloc / 5;
+    sT avp12 = 0;
+    int navp12 = 0;
+    for (int i = startloc1 + sloff1; i < startloc1 + dsloc - sloff1; ++i) {
+        avp12 += line[z_ind(i, dz)];
+        ++navp12;
+    }
+    if(navp12 > 0) {
+        avp12 /= navp12;
+    }
+    int dslocc = lattice.size(dz) - dsloc;
+    int sloff2 = dslocc / 5;
+    sT avp21 = 0;
+    int navp21 = 0;
+    for (int i = startloc2 + sloff2; i < startloc2 + dslocc - sloff2; ++i) {
+        avp21 += line[z_ind(i, dz)];
+        ++navp21;
+    }
+    if (navp21 > 0) {
+        avp21 /= navp21;
+    }
 
-    if(abs(dsloc) > lattice.size(dz)/5) {
+    hila::out0 << string_format("sloc1=% 4d, sloc2=% 4d, dsloc=% 4d, avPc=% 0.4f, avPdc=% 0.4f\n",
+                                startloc1, startloc2, dsloc, avp21, avp12);
+
+    if(abs(dsloc) > lattice.size(dz) / 5) {
         std::vector<sT> lsmS;
         CoordinateVector yslice;
         foralldir(td) {
