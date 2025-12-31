@@ -751,13 +751,13 @@ bool accept_polyakov_pot(const parameters &p, const double p_now, const double p
     return accept;
 }
 
-bool accept_polyakov_range(const parameters &p, const double p_old, const double p_new) {
+bool accept_polyakov_range(const parameters &p, const double p_old, const double p_now, const double p_new) {
 
     if (p_new >= p.poly_min && p_new <= p.poly_max)
         return true;
-    if (p_new > p.poly_max && p_new <= p_old)
+    if (p_new > p.poly_max && (p_new <= p_old || p_new <= p_now))
         return true;
-    if (p_new < p.poly_min && p_new >= p_old)
+    if (p_new < p.poly_min && (p_new >= p_old || p_new >= p_now))
         return true;
     
     return false;
@@ -808,7 +808,7 @@ double update_once_with_range(GaugeField<group> &U, const parameters &p, double 
             if (p.polyakov_pot == poly_limit::PARABOLIC) {
                 acc_update = accept_polyakov_pot(p, p_now, p_new);
             } else {
-                acc_update = accept_polyakov_range(p, p_prev, p_new);
+                acc_update = accept_polyakov_range(p, p_prev, p_now, p_new);
             }
             ++nacc;
             if (acc_update) {
