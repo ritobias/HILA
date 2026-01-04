@@ -350,6 +350,229 @@ void spectraldensity_surface(std::vector<sT> &surf, int size_x, int size_y,
     }
 }
 
+
+template <typename sT, typename aT>
+bool measure_interface_ft(const Field<sT> &smS, Direction dz, std::vector<aT> &surf, out_only int &size_x, out_only int &size_y) {
+
+    Direction dx, dy;
+    foralldir(td) if (td != dz) {
+        dx = td;
+        break;
+    }
+    foralldir(td) if (td != dz && td != dx) {
+        dy = td;
+        break;
+    }
+
+    size_x = lattice.size(dx);
+    size_y = lattice.size(dy);
+
+    int area = size_x * size_y;
+
+    static std::vector<Complex<sT>> ft_basis;
+    static bool first = true;
+
+    if (first) {
+        first = false;
+        ft_basis.resize(lattice.size(dz));
+        sT tsign = (sT)1.0;
+        for (int iz = 0; iz < lattice.size(dz); ++iz) {
+            sT ftarg = 2.0 * M_PI * (sT)iz / (sT)lattice.size(dz);
+            ft_basis[iz].polar(tsign, ftarg);
+        }
+    }
+
+
+    if (hila::myrank() == 0) {
+        surf.resize(area);
+    }
+
+    std::vector<sT> lS;
+
+    CoordinateVector yslice;
+    foralldir(td) {
+        if (td < e_t) {
+            yslice[td] = -1;
+        } else {
+            yslice[td] = 0;
+        }
+    }
+    Complex<sT> ftn;
+    sT midz = 0.0;
+    for (int y = 0; y < size_y; ++y) {
+        yslice[dy] = y;
+        lS = smS.get_slice(yslice);
+        if (hila::myrank() == 0) {
+            for (int x = 0; x < size_x; ++x) {
+                ftn = 0;
+                for (int z = 0; z < lattice.size(dz); z++) {
+                    ftn += lS[x + size_x * z] * ft_basis[z];
+                }
+                sT ftres = (sT)arg(ftn) * (sT)lattice.size(dz) / (2.0 * M_PI);
+                if(ftres < 0) {
+                    ftres += (sT)lattice.size(dz);
+                }
+                surf[x + y * size_x] = M_SQRT2 * ftres;
+                midz += ftres;
+            }
+        }
+    }
+    midz /= area;
+    hila::out0 << string_format("ft z_mid=% 0.4f\n", midz);
+    return true;
+}
+
+
+template <typename sT, typename aT>
+bool measure_interface_spectrum_ft(Field<sT> &smS, Direction dir_z, aT surface_level, int nsm,
+                                int64_t idump, parameters &p, bool first_pow) {
+    std::vector<sT> surf;
+    int size_x, size_y;
+    bool ok = measure_interface_ft(smS, dir_z, surf, size_x, size_y);
+
+    if (hila::myrank() == 0) {
+        if (false) {
+            for (int x = 0; x < size_x; ++x) {
+                for (int y = 0; y < size_y; ++y) {
+                    hila::out0 << "SURF" << nsm << ' ' << x << ' ' << y << ' '
+                               << surf[x + y * size_x] << '\n';
+                }
+            }
+        }
+        constexpr int pow_size = 200;
+        std::vector<double> npow(pow_size, 0);
+        std::vector<int> hits(pow_size, 0);
+        if (ok) {
+            spectraldensity_surface(surf, size_x, size_y, npow, hits);
+        } else {
+            int area = size_x * size_y;
+            for (int i = 0; i < area; i++) {
+                int x = i % size_x;
+                int y = i / size_x;
+                x = (x <= size_x / 2) ? x : (size_x - x);
+                y = (y <= size_y / 2) ? y : (size_y - y);
+
+                int k = x * x + y * y;
+                if (k < pow_size) {
+                    hits[k]++;
+                }
+            }
+        }
+
+        std::string prof_file = string_format("profile_ft_nsm%04d", nsm);
+        std::ofstream prof_os;
+
+        if (first_pow) {
+            int64_t npowmeas = 0;
+            for (int ipow = 0; ipow < pow_size; ++ipow) {
+                if (hits[ipow] > 0) {
+                    ++npowmeas;
+                }
+            }
+
+            if (filesys_ns::exists(prof_file)) {
+                std::string prof_file_temp = prof_file + "_temp";
+                filesys_ns::rename(prof_file, prof_file_temp);
+                std::ifstream ifile;
+                ifile.open(prof_file_temp, std::ios::in | std::ios::binary);
+                prof_os.open(prof_file, std::ios::out | std::ios::binary);
+
+                int64_t *ibuff = (int64_t *)memalloc((NDIM + 5) * sizeof(int64_t));
+                ifile.read((char *)ibuff, (NDIM + 5) * sizeof(int64_t));
+                prof_os.write((char *)ibuff, (NDIM + 5) * sizeof(int64_t));
+                int64_t tnpowmeas = ibuff[NDIM + 2];
+                double *buffer = nullptr;
+                if (tnpowmeas > npowmeas) {
+                    buffer = (double *)memalloc(tnpowmeas * sizeof(double));
+                } else {
+                    buffer = (double *)memalloc(npowmeas * sizeof(double));
+                    for (int tib = tnpowmeas; tib < npowmeas; ++tib) {
+                        buffer[tib] = 0;
+                    }
+                }
+                ifile.read((char *)buffer, 2 * sizeof(double));
+                prof_os.write((char *)buffer, 2 * sizeof(double));
+
+                ifile.read((char *)buffer, tnpowmeas * sizeof(double));
+
+                npowmeas = 0;
+                for (int ipow = 0; ipow < pow_size; ++ipow) {
+                    if (hits[ipow] > 0) {
+                        buffer[npowmeas] = (double)ipow;
+                        ++npowmeas;
+                    }
+                }
+                prof_os.write((char *)buffer, npowmeas * sizeof(double));
+
+                while (ifile.good()) {
+                    ifile.read((char *)ibuff, sizeof(int64_t));
+                    int64_t tidump = ibuff[0];
+                    ifile.read((char *)buffer, tnpowmeas * sizeof(double));
+                    if (ifile.good() && tidump < idump) {
+                        prof_os.write((char *)&(tidump), sizeof(int64_t));
+                        prof_os.write((char *)buffer, npowmeas * sizeof(double));
+                    } else {
+                        break;
+                    }
+                }
+                ifile.close();
+                prof_os.close();
+                free(buffer);
+                free(ibuff);
+                filesys_ns::remove(prof_file_temp);
+            } else {
+                prof_os.open(prof_file, std::ios::out | std::ios::binary);
+                int64_t *ibuff = (int64_t *)memalloc((NDIM + 5) * sizeof(int64_t));
+                ibuff[0] = NCOLOR;
+                ibuff[1] = NDIM;
+                foralldir(d) {
+                    ibuff[2 + (int)d] = lattice.size(d);
+                }
+                ibuff[NDIM + 2] = npowmeas;
+                ibuff[NDIM + 3] = nsm;
+                ibuff[NDIM + 4] = sizeof(double);
+                prof_os.write((char *)ibuff, (NDIM + 5) * sizeof(int64_t));
+                double tval = p.beta;
+                prof_os.write((char *)&(tval), sizeof(double));
+                tval = p.smear_coeff;
+                prof_os.write((char *)&(tval), sizeof(double));
+
+                double *buffer = (double *)memalloc(npowmeas * sizeof(double));
+                for (int tib = npowmeas; tib < npowmeas; ++tib) {
+                    buffer[tib] = 0;
+                }
+                npowmeas = 0;
+                for (int ipow = 0; ipow < pow_size; ++ipow) {
+                    if (hits[ipow] > 0) {
+                        buffer[npowmeas] = (double)ipow;
+                        ++npowmeas;
+                    }
+                }
+                prof_os.write((char *)buffer, npowmeas * sizeof(double));
+
+                prof_os.close();
+                free(buffer);
+                free(ibuff);
+            }
+        }
+
+        if (ok) {
+            prof_os.open(prof_file, std::ios::out | std::ios_base::app | std::ios::binary);
+
+            prof_os.write((char *)&(idump), sizeof(int64_t));
+            for (int ipow = 0; ipow < pow_size; ++ipow) {
+                if (hits[ipow] > 0) {
+                    double tval = npow[ipow] / hits[ipow];
+                    prof_os.write((char *)&(tval), sizeof(double));
+                }
+            }
+            prof_os.close();
+        }
+    }
+    return true;
+}
+
+
 template <typename sT, typename pT, typename aT>
 bool measure_interface(const Field<sT> &smS, Direction dz, pT surface_level, std::vector<aT> &surf1,
                        std::vector<aT> &surf2, out_only int &size_x, out_only int &size_y) {
@@ -1023,7 +1246,10 @@ int main(int argc, char **argv) {
                             }
                         }
                     }
-                    measure_interface_spectrum(tsmS, e_z, surface_level, n_smear, idump, p, first_pow);
+                    measure_interface_spectrum(tsmS, e_z, surface_level, n_smear, idump, p,
+                                               first_pow);
+                    measure_interface_spectrum_ft(tsmS, e_z, surface_level, n_smear, idump, p,
+                                                  first_pow);
                 }
                 first_pow = false;
             }
