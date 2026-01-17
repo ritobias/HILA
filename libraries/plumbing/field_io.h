@@ -110,6 +110,8 @@ void Field<T>::write(std::ofstream &outputfile, bool binary, int precision) cons
     std::free(buffer);
 }
 
+
+
 /// Write the Field to a named file replacing the file
 template <typename T>
 void Field<T>::write(const std::string &filename, bool binary, int precision) const {
@@ -419,7 +421,7 @@ void Field<T>::write_subvolume(const std::string &filename, const CoordinateVect
     hila::close_file(filename, out);
 }
 
-// Write a subspace (slice) of the original lattice.  Here
+// Write field configuration of a subspace (slice) of the original lattice.  Here
 // slice[d] = fixed coordinate value, or < 0: run the dimension through.
 // For example, slice = {5,2,-1,0}; prints the line along z-axis at (x,y,t) = (5,2,0)
 // Outf is either filename or ofstream
@@ -442,6 +444,127 @@ void Field<T>::write_slice(outf_type &outf, const CoordinateVector &slice, int p
         }
     }
     write_subvolume(outf, cmin, cmax, precision);
+}
+
+// Write field configuration of subvolume of the original lattice in binary or ascii format.
+template <typename T>
+void Field<T>::subvolume_write(std::ofstream &outputfile, const CoordinateVector &cmin,
+                               const CoordinateVector &cmax, bool binary, int precision) const {
+    constexpr size_t sites_per_write = WRITE_BUFFER_SIZE / sizeof(T);
+
+    if (!binary && hila::myrank() == 0) {
+        outputfile.precision(precision);
+    }
+
+    size_t sites = 1;
+    int line_len = 1; // number of elements on 1st non-trivial dimension
+    foralldir(d) {
+        assert(cmin[d] >= 0 && cmax[d] >= cmin[d] && cmax[d] < lattice.size(d) &&
+               "subvolume size mismatch");
+        sites *= cmax[d] - cmin[d] + 1;
+
+        if (line_len == 1)
+            line_len = sites;
+    }
+
+    size_t n_write = std::min(sites_per_write, sites);
+    size_t write_size = n_write * sizeof(T);
+
+    std::vector<CoordinateVector> coord_list(n_write);
+    T *buffer = (T *)memalloc(write_size);
+
+    CoordinateVector c;
+
+    size_t i = 0, j = 0;
+    forcoordinaterange(c, cmin, cmax) {
+        coord_list[i] = c;
+        i++;
+        j++;
+        if (i == n_write || j == sites) {
+            if (i < n_write) {
+                coord_list.resize(i);
+                write_size = i * sizeof(T);
+            }
+            fs->gather_elements(buffer, coord_list);
+
+            if (hila::myrank() == 0) {
+                if (binary) {
+                    outputfile.write((char *)buffer, write_size);
+                } else {
+                    for (size_t k = 0; k < i; k++) {
+                        for (int l = 0; l < sizeof(T) / sizeof(hila::arithmetic_type<T>); l++) {
+                            outputfile << hila::get_number_in_var(buffer[k], l) << ' ';
+                        }
+                        outputfile << '\n';
+                    }
+                }
+            }
+            i = 0;
+        }
+    }
+
+    std::free(buffer);
+}
+
+template <typename T>
+template <typename outf_type>
+void Field<T>::slice_write(outf_type &outf, const CoordinateVector &slice, bool binary,
+                           int precision) const {
+
+    static_assert(std::is_same<outf_type, std::string>::value ||
+                      std::is_same<outf_type, std::ofstream>::value,
+                  "file name / output stream argument in slice_write()?");
+
+    CoordinateVector cmin, cmax;
+    foralldir(d) {
+        if (slice[d] < 0) {
+            cmin[d] = 0;
+            cmax[d] = lattice.size(d) - 1;
+        } else {
+            cmin[d] = cmax[d] = slice[d];
+        }
+    }
+    subvolume_write(outf, cmin, cmax, binary, precision);
+}
+
+template <typename T>
+void Field<T>::config_slice_write(const std::string &filename,
+                                  const CoordinateVector &slice) const {
+    std::ofstream outputfile;
+    hila::open_output_file(filename, outputfile);
+
+    CoordinateVector cmin, cmax;
+    int64_t ndim = 0;
+    foralldir(d) {
+        if (slice[d] < 0) {
+            cmin[d] = 0;
+            cmax[d] = lattice.size(d) - 1;
+            ++ndim;
+        } else {
+            cmin[d] = cmax[d] = slice[d];
+        }
+    }
+
+    // write header
+    if (hila::myrank() == 0) {
+        int64_t f = config_flag;
+        outputfile.write(reinterpret_cast<char *>(&f), sizeof(int64_t));
+        f = ndim;
+        outputfile.write(reinterpret_cast<char *>(&f), sizeof(int64_t));
+        f = sizeof(T);
+        outputfile.write(reinterpret_cast<char *>(&f), sizeof(int64_t));
+
+        foralldir(d) {
+            if(cmax[d] > cmin[d]) {
+                f = cmax[d] - cmin[d] + 1;
+                outputfile.write(reinterpret_cast<char *>(&f), sizeof(int64_t));
+            }
+        }
+    }
+
+    subvolume_write(outputfile, cmin, cmax);
+    
+    hila::close_file(filename, outputfile);
 }
 
 

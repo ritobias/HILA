@@ -1707,6 +1707,15 @@ class Field {
     template <typename Out>
     void write_slice(Out &outputfile, const CoordinateVector &slice, int precision = 6) const;
 
+    void subvolume_write(std::ofstream &outputfile, const CoordinateVector &cmin,
+                         const CoordinateVector &cmax, bool binary = true, int precision = 8) const;
+
+    template <typename Out>
+    void slice_write(Out &outputfile, const CoordinateVector &slice, bool binary = true,
+                     int precision = 8) const;
+
+    void config_slice_write(const std::string &filename, const CoordinateVector &slice) const;
+
     /**
      * @brief Sum reduction of Field
      * @details The sum in the reduction is defined by the Field type T

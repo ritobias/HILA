@@ -80,9 +80,9 @@ using plaqw_t = std::array<std::array<Field<T>, NDIM>, NDIM>;
  * @param plaqw plaquette weights 
  * @param par Parity to compute staplesum for
  */
-template <typename T>
+template <typename T, typename wT>
 void staplesum(const GaugeField<T> &U, Field<T> &staples, Direction d1,
-               const plaqw_t<hila::arithmetic_type<T>> &plaqw, Parity par = ALL) {
+               const plaqw_t<wT> &plaqw, Parity par = ALL) {
 
     Field<T> lower;
 
@@ -97,7 +97,7 @@ void staplesum(const GaugeField<T> &U, Field<T> &staples, Direction d1,
         // calculate first lower 'U' of the staple sum
         // do it on opp parity
         onsites(opp_parity(par)) {
-            lower[X] = plaqw[d1][d2][X] * U[d2][X].dagger() * U[d1][X] * U[d2][X + d1];
+            lower[X] = conj(plaqw[d1][d2][X]) * U[d2][X].dagger() * U[d1][X] * U[d2][X + d1];
         }
 
         // calculate then the upper 'n', and add the lower

@@ -25,3 +25,4 @@ html/
 applications/*/test*/*
 *profile_*
 *fdump_*
+*dump*

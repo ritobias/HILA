@@ -57,9 +57,9 @@ struct parameters {
  * @param relax If true evolves GaugeField with over relaxation if false then with heat bath
  * @param plaqw plaquette weights
  */
-template <typename group>
+template <typename group, typename wT>
 void update_parity_dir(GaugeField<group> &U, const parameters &p, Parity par, Direction d,
-                       bool relax, const plaqw_t<ftype> &plaqw) {
+                       bool relax, const plaqw_t<wT> &plaqw) {
 
     static hila::timer hb_timer("Heatbath");
     static hila::timer or_timer("Overrelax");
@@ -84,8 +84,8 @@ void update_parity_dir(GaugeField<group> &U, const parameters &p, Parity par, Di
 #ifdef SUN_OVERRELAX_dFJ
                 suN_overrelax_dFJ(U[d][X], staples[X], p.beta);
 #else
-                //suN_overrelax(U[d][X], staples[X]);
-                suN_overrelax(U[d][X], staples[X], p.beta);
+                suN_overrelax(U[d][X], staples[X]);
+                //suN_overrelax(U[d][X], staples[X], p.beta);
 #endif
             }
         }
@@ -113,8 +113,8 @@ void update_parity_dir(GaugeField<group> &U, const parameters &p, Parity par, Di
  * @param p Parameter struct
  * @param plaqw plaquette weights
  */
-template <typename group>
-void update(GaugeField<group> &U, const parameters &p, const plaqw_t<ftype> &plaqw) {
+template <typename group, typename wT>
+void update(GaugeField<group> &U, const parameters &p, const plaqw_t<wT> &plaqw) {
     for (int i = 0; i < 2 * NDIM; ++i) {
         int tdp = hila::broadcast((int)(hila::random() * 2 * NDIM));
         int tdir = tdp / 2;
@@ -135,8 +135,8 @@ void update(GaugeField<group> &U, const parameters &p, const plaqw_t<ftype> &pla
  * @param U
  * @param p
  */
-template <typename group>
-void do_trajectory(GaugeField<group> &U, const plaqw_t<ftype> &plaqw, const parameters &p) {
+template <typename group, typename wT>
+void do_trajectory(GaugeField<group> &U, const plaqw_t<wT> &plaqw, const parameters &p) {
     for (int n = 0; n < p.n_update; n++) {
         for (int i = 0; i <= p.n_overrelax; i++) {
             update(U, p, plaqw);
@@ -150,9 +150,9 @@ void do_trajectory(GaugeField<group> &U, const plaqw_t<ftype> &plaqw, const para
 ///////////////////////////////////////////////////////////////////////////////////
 // measurement functions
 
-template <typename group>
+template <typename group, typename wT>
 std::vector<double> measure_s_wplaq_ps(const GaugeField<group> &U, Direction obd,
-                                       const plaqw_t<ftype> &plaqw) {
+                                       const plaqw_t<wT> &plaqw) {
     // measure the total Wilson plaquette action for the gauge field U
     int obdlsize = lattice.size(obd);
     ReductionVector<double> plaql(obdlsize);
@@ -236,8 +236,8 @@ std::vector<Complex<double>> measure_polyakov_ps(const GaugeField<T> &U, Directi
     return ploopl.vector();
 }
 
-template <typename group>
-void measure_stuff(const GaugeField<group> &U, const plaqw_t<ftype> &plaqw) {
+template <typename group, typename wT>
+void measure_stuff(const GaugeField<group> &U, const plaqw_t<wT> &plaqw) {
     // perform measurements on current gauge and momentum pair (U, E) and
     // print results in formatted form to standard output
     static bool first = true;

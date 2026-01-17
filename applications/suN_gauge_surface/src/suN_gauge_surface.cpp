@@ -423,11 +423,12 @@ bool measure_interface_ft(const Field<sT> &smS, Direction dz, std::vector<aT> &s
 }
 
 
-template <typename sT, typename aT>
-bool measure_interface_spectrum_ft(Field<sT> &smS, Direction dir_z, aT surface_level, int nsm,
+template <typename sT>
+bool measure_interface_spectrum_ft(const Field<sT> &smS, Direction dir_z, int nsm,
                                 int64_t idump, parameters &p, bool first_pow) {
     std::vector<sT> surf;
     int size_x, size_y;
+    hila::out0 << "SMEARFT" << nsm << " ";
     bool ok = measure_interface_ft(smS, dir_z, surf, size_x, size_y);
 
     if (hila::myrank() == 0) {
@@ -446,7 +447,7 @@ bool measure_interface_spectrum_ft(Field<sT> &smS, Direction dir_z, aT surface_l
             spectraldensity_surface(surf, size_x, size_y, npow, hits);
         } else {
             int area = size_x * size_y;
-            for (int i = 0; i < area; i++) {
+            for (int i = 0; i < area; ++i) {
                 int x = i % size_x;
                 int y = i / size_x;
                 x = (x <= size_x / 2) ? x : (size_x - x);
@@ -680,9 +681,8 @@ bool measure_interface(const Field<sT> &smS, Direction dz, pT surface_level, std
                         z++;
 
                     // do linear interpolation
-                    surf1[x + y * lattice.size(dx)] =
-                        z + (surface_level - line[z_ind(z, dz)]) /
-                                (line[z_ind(z + 1, dz)] - line[z_ind(z, dz)]);
+                    surf1[x + y * size_x] = z + (surface_level - line[z_ind(z, dz)]) /
+                                                    (line[z_ind(z + 1, dz)] - line[z_ind(z, dz)]);
 
 
                     // and locate the other surface
@@ -696,9 +696,8 @@ bool measure_interface(const Field<sT> &smS, Direction dz, pT surface_level, std
                         z++;
 
                     // do linear interpolation
-                    surf2[x + y * lattice.size(dx)] =
-                        z + (surface_level - line[z_ind(z, dz)]) /
-                                (line[z_ind(z + 1, dz)] - line[z_ind(z, dz)]);
+                    surf2[x + y * size_x] = z + (surface_level - line[z_ind(z, dz)]) /
+                                                    (line[z_ind(z + 1, dz)] - line[z_ind(z, dz)]);
                 }
             }
         }
@@ -716,7 +715,7 @@ bool measure_interface(const Field<sT> &smS, Direction dz, pT surface_level, std
 
 
 template <typename sT, typename aT>
-bool measure_interface_spectrum(Field<sT> &smS, Direction dir_z, aT surface_level, int nsm, int64_t idump,
+bool measure_interface_spectrum(const Field<sT> &smS, Direction dir_z, aT surface_level, int nsm, int64_t idump,
                                 parameters &p, bool first_pow) {
     std::vector<sT> surf1, surf2;
     int size_x, size_y;
@@ -736,11 +735,18 @@ bool measure_interface_spectrum(Field<sT> &smS, Direction dir_z, aT surface_leve
         std::vector<double> npow(pow_size, 0);
         std::vector<int> hits(pow_size, 0);
         if(ok) {
-            spectraldensity_surface(surf1, size_x, size_y, npow, hits);
-            spectraldensity_surface(surf2, size_x, size_y, npow, hits);
+            if(false) {
+                for (int i = 0; i < surf1.size(); ++i) {
+                    surf1[i] = (surf1[i] + surf2[i]) / M_SQRT2;
+                }
+                spectraldensity_surface(surf1, size_x, size_y, npow, hits);
+            } else {
+                spectraldensity_surface(surf1, size_x, size_y, npow, hits);
+                spectraldensity_surface(surf2, size_x, size_y, npow, hits);
+            }
         } else {
             int area = size_x * size_y;
-            for (int i = 0; i < area; i++) {
+            for (int i = 0; i < area; ++i) {
                 int x = i % size_x;
                 int y = i / size_x;
                 x = (x <= size_x / 2) ? x : (size_x - x);
@@ -1227,9 +1233,12 @@ int main(int argc, char **argv) {
                 if (p.polyakov_pot == poly_limit::RANGE) {
                     surface_level = 0.5 * (p.poly_min + p.poly_max);
                 }
-                hila::out0 << string_format("SURFLEV %0.3f\n", surface_level);
+                hila::out0 << string_format("SURFLEV %0.5f\n", surface_level);
 
                 int n_smear = 0;
+                if(p.n_smear.size() == 0 || p.n_smear[0] != 0) {
+                    measure_interface_spectrum_ft(smS, e_z, n_smear, idump, p, first_pow);
+                }
 
                 for (int ism = 0; ism < p.n_smear.size(); ++ism) {
                     int smear = p.n_smear[ism];
@@ -1246,10 +1255,10 @@ int main(int argc, char **argv) {
                             }
                         }
                     }
-                    measure_interface_spectrum(tsmS, e_z, surface_level, n_smear, idump, p,
-                                               first_pow);
-                    measure_interface_spectrum_ft(tsmS, e_z, surface_level, n_smear, idump, p,
-                                                  first_pow);
+                    if(n_smear > 0) {
+                        measure_interface_spectrum(tsmS, e_z, surface_level, n_smear, idump, p, first_pow);
+                    }
+                    measure_interface_spectrum_ft(smS, e_z, n_smear, idump, p, first_pow);
                 }
                 first_pow = false;
             }
