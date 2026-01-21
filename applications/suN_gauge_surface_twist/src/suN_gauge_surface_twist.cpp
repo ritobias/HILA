@@ -30,6 +30,8 @@ struct parameters {
     int n_ifcentering;
     std::string config_file;
     double time_offset;
+    int use_logsmear;
+    int n_presmear;
     std::vector<int> n_smear;
     double smear_coeff;
     std::vector<int> z_smear;
@@ -161,8 +163,9 @@ double measure_plaq(const GaugeField<group> &U, const plaqw_t<wT> &plaqw) {
 }
 
 template <typename group, typename wT>
-void translate_config(GaugeField<group> &U, const plaqw_t<wT> &plaqw, Direction dir1) {
+void translate_config(GaugeField<group> &U, const plaqw_t<wT> &plaqw, Direction odir1) {
     Field<group> tU;
+    Direction dir1 = opp_dir(odir1);
     foralldir(dir2) {
         if(dir2 < e_t) {
             onsites(ALL) {
@@ -323,7 +326,7 @@ Complex<T> phase_to_complex(T arg) {
 
 
 template <typename T>
-Complex<T> proj_to_nrange(Complex<T> inval) {
+Complex<T> proj_to_range(Complex<T> inval) {
     while (inval > (T)M_PI) {
         inval.imag() -= (T)(2.0 * M_PI);
     }
@@ -334,7 +337,7 @@ Complex<T> proj_to_nrange(Complex<T> inval) {
 }
 
 template <typename T>
-T proj_to_nrange(T inval) {
+T proj_to_range(T inval) {
     while (inval > (T)M_PI) {
         inval -= (T)(2.0 * M_PI);
     }
@@ -343,19 +346,6 @@ T proj_to_nrange(T inval) {
     }
     return inval;
 }
-
-
-template <typename T>
-Complex<T> proj_to_nrange(Complex<T> inval, T tol) {
-    while (inval.imag() > (T)M_PI + tol) {
-        inval.imag() -= (T)(2.0 * M_PI);
-    }
-    while (inval.imag() <= -((T)M_PI + tol)) {
-        inval.imag() += (T)(2.0 * M_PI);
-    }
-    return inval;
-}
-
 
 template <typename sT>
 void spectraldensity_surface(std::vector<sT> &surf, int size_x, int size_y,
@@ -404,8 +394,7 @@ void spectraldensity_surface(std::vector<sT> &surf, int size_x, int size_y,
 
 
 template <typename T, typename sT, typename aT>
-void smear_spat_field(Field<Complex<T>> &smS, const VectorField<sT> &shift, aT smear_param, int n_smear,
-                 Complex<T> smSmean) {
+void smear_spat_field(Field<Complex<T>> &smS, const VectorField<sT> &shift, aT smear_param, int n_smear) {
     if(n_smear>0) {
         Field<Complex<T>> tsmS, tsmS2;
         onsites(ALL) {
@@ -442,6 +431,45 @@ void smear_spat_field(Field<Complex<T>> &smS, const VectorField<sT> &shift, aT s
     }
 }
 
+template <typename T, typename sT, typename aT>
+void smear_spat_field_l(Field<Complex<T>> &smS, const VectorField<sT> &shift, aT smear_param,
+                      int n_smear) {
+    if (n_smear > 0) {
+        Field<Complex<T>> tsmS, tsmS2;
+        onsites(ALL) {
+            if (X.coordinate(e_t) == 0) {
+                tsmS[X] = smS[X];
+            }
+        }
+        for (int ism = 0; ism < n_smear; ++ism) {
+            onsites(ALL) {
+                if (X.coordinate(e_t) == 0) {
+                    tsmS2[X] = tsmS[X];
+                }
+            }
+            foralldir(d) if (d < e_t) {
+                onsites(ALL) {
+                    if (X.coordinate(e_t) == 0) {
+                        tsmS2[X] += smear_param * (tsmS[X + d] - Complex<T>(0, shift[d][X]));
+
+                        tsmS2[X] += smear_param * (tsmS[X - d] + Complex<T>(0, shift[d][X - d]));
+                    }
+                }
+            }
+            onsites(ALL) {
+                if (X.coordinate(e_t) == 0) {
+                    tsmS[X] = tsmS2[X] / ((T)1.0 + (T)(2.0 * (NDIM - 1)) * smear_param);
+                }
+            }
+        }
+        onsites(ALL) {
+            if (X.coordinate(e_t) == 0) {
+                smS[X] = tsmS[X];
+            }
+        }
+    }
+}
+
 template <typename T, typename sT>
 void measure_profile_l(const Field<Complex<T>> &smS, Direction d, std::vector<sT> &profile) {
     ReductionVector<sT> p(lattice.size(d));
@@ -457,7 +485,7 @@ void measure_profile_l(const Field<Complex<T>> &smS, Direction d, std::vector<sT
 }
 
 template <typename T, typename sT>
-void measure_profile(const Field<Complex<T>> &smS, Direction d, T twist, std::vector<sT> &profile) {
+void measure_profile(const Field<Complex<T>> &smS, Direction d, T midpoint, std::vector<sT> &profile) {
     ReductionVector<Complex<T>> p(lattice.size(d));
     p.allreduce(false).delayed(true);
     sT area = (sT)(lattice.volume() / lattice.size(d) / lattice.size(e_t));
@@ -470,7 +498,7 @@ void measure_profile(const Field<Complex<T>> &smS, Direction d, T twist, std::ve
     profile.resize(p.size());
     for (int i = 0; i < p.size(); ++i) {
         if (abs(p[i]) > 0) {
-            profile[i] = proj_to_nrange(arg(p[i]) - twist) + twist;
+            profile[i] = proj_to_range(arg(p[i]) - midpoint) + midpoint;
         } else {
             profile[i] = 0;
         }
@@ -530,20 +558,20 @@ void center_interface(GaugeField<group> &U, const plaqw_t<wT> &plaqw, Direction 
     hila::broadcast(startloc);
 
     hila::out0 << "CENTERING in " << dz << "-direction, shifting by "
-               << (lattice.size(dz) / 2 - startloc) << " sites\n";
+               << (lattice.size(dz) / 2 - 1 - startloc) << " sites\n";
 
-    while (startloc < lattice.size(dz) / 2) {
-        translate_config(U, plaqw, opp_dir(dz));
+    while (startloc < lattice.size(dz) / 2 - 1) {
+        translate_config(U, plaqw, dz);
         ++startloc;
     }
     while (startloc >= lattice.size(dz) / 2) {
-        translate_config(U, plaqw, dz);
+        translate_config(U, plaqw, opp_dir(dz));
         --startloc;
     }
 }
 
-template <typename T, typename sT>
-void measure_interface(const Field<Complex<T>> &ismS, Direction dz, sT surface_level, std::vector<sT> &surf,
+template <typename T, typename slT, typename sT>
+void measure_interface(const Field<Complex<T>> &ismS, Direction dz, slT surface_level, std::vector<sT> &surf,
                        out_only int &size_x, out_only int &size_y) {
 
     Direction dx, dy;
@@ -572,7 +600,7 @@ void measure_interface(const Field<Complex<T>> &ismS, Direction dz, sT surface_l
     Field<T> smS;
     onsites(ALL) {
         if (X.coordinate(e_t) == 0 && abs(ismS[X]) > 0) {
-            smS[X] = proj_to_nrange(arg(ismS[X]) - surface_level) + surface_level;
+            smS[X] = proj_to_range(arg(ismS[X]) - surface_level) + surface_level;
         } else {
             smS[X] = 0;
         }
@@ -664,7 +692,7 @@ void measure_interface(const Field<Complex<T>> &ismS, Direction dz, sT surface_l
 
 template <typename T, typename sT>
 void measure_interface_spectrum(Field<Complex<T>> &smS, Direction dir_z, sT surface_level,
-                                int bds_shift, int nsm, int64_t idump, parameters &p,
+                                int nsm, int64_t idump, parameters &p,
                                 bool first_pow) {
     std::vector<ftype> surf;
     int size_x, size_y;
@@ -820,7 +848,7 @@ void measure_interface_ft(const Field<Complex<T>> &ismS, Direction dz, int bds_s
         first = false;
         ft_basis.resize(lattice.size(dz));
         sT tsign = (sT)1.0;
-        if (bds_shift < 0) {
+        if (bds_shift > 0) {
             tsign = -tsign;
         }
         for (int iz = 0; iz < lattice.size(dz); ++iz) {
@@ -838,7 +866,7 @@ void measure_interface_ft(const Field<Complex<T>> &ismS, Direction dz, int bds_s
     onsites(ALL) {
         if (X.coordinate(e_t) == 0) {
             if (abs(ismS[X]) > 0) {
-                smS[X] = proj_to_nrange(arg(ismS[X]) - tiltang) + tiltang;
+                smS[X] = proj_to_range(arg(ismS[X]) - tiltang);
             } else {
                 smS[X] = 0;
             }
@@ -863,7 +891,7 @@ void measure_interface_ft(const Field<Complex<T>> &ismS, Direction dz, int bds_s
             for (int x = 0; x < size_x; ++x) {
                 ftn = 0;
                 for (int z = 0; z < lattice.size(dz); z++) {
-                    ftn += (2.0 * (sT)lS[x + size_x * z] + (sT)bds_shift) * ft_basis[z];
+                    ftn += 2.0 * lS[x + size_x * z] * ft_basis[z];
                 }
 
                 surf[x + y * size_x] =
@@ -881,13 +909,15 @@ void measure_interface_spectrum_ft(Field<Complex<T>> &smS, Direction dir_z, int 
     int size_x, size_y;
     measure_interface_ft(smS, dir_z, bds_shift, surf, size_x, size_y);
     if (hila::myrank() == 0) {
-        if (false) {
+        if (true) {
+            T meansurfloc = 0;
             for (int x = 0; x < size_x; ++x) {
                 for (int y = 0; y < size_y; ++y) {
-                    hila::out0 << "SURFFT" << nsm << ' ' << x << ' ' << y << ' '
-                               << surf[x + y * size_x] << '\n';
+                    meansurfloc += surf[x + y * size_x];
                 }
             }
+            meansurfloc /= size_x * size_y;
+            hila::out0 << "SURFLOCFT" << nsm << ' ' << meansurfloc << '\n';
         }
         constexpr int pow_size = 200;
         std::vector<double> npow(pow_size, 0);
@@ -1051,18 +1081,28 @@ int main(int argc, char **argv) {
     // boundary shift
     int bds_dir = par.get("bds direction");
     int bds_shift = par.get("bds shift");
+    while (bds_shift > NCOLOR / 2) {
+        bds_shift -= NCOLOR;
+    }
+    while (bds_shift <= -(NCOLOR + 1) / 2) {
+        bds_shift += NCOLOR;
+    }
+
+    // updates between interface re-centering updates (translations)
     if (par.get_item("updates/centering", {"off", "%i"}) == 1) {
         p.n_ifcentering = par.get();
     } else {
         p.n_ifcentering = 0;
     }
 
+    // updates between profile measurements
     if (par.get_item("updates/profile meas", {"off", "%i"}) == 1) {
         p.n_profile = par.get();
     } else {
         p.n_profile = 0;
     }
 
+    // updates between surface spectrum measurements
     if (par.get_item("updates/surf spec meas", {"off", "%i"}) == 1) {
         p.n_surf_spec = par.get();
     } else {
@@ -1070,6 +1110,8 @@ int main(int argc, char **argv) {
     }
 
     if (p.n_surf_spec) {
+        p.use_logsmear = par.get("use log smearing");
+        p.n_presmear = par.get("presmearing steps");
         p.n_smear = par.get("smearing steps");
         p.smear_coeff = par.get("smear coefficient");
         p.z_smear = par.get("z smearing steps");
@@ -1100,21 +1142,27 @@ int main(int argc, char **argv) {
     // use negative trajectory number for thermalization
     int start_traj = -p.n_thermal;
 
-    // define direction in which boundary shift should be implemented
+    // define direction in which phase shift should occur wehen wrapping around the lattice
     Direction bdt_dir = Direction(bds_dir);
 
 
+    // define complex plaquette weight "plaqw" field to implement the phase shift in the gauge
+    // action, as well as a twist vector field "shift" to implement the phase shift in the
+    // Polyakov lop field.
     plaqw_t<Complex<ftype>> plaqw;
     VectorField<Complex<double>> shift;
-    ftype ltw_ang = 2.0 * M_PI * (double)bds_shift / (double)NCOLOR;
+    VectorField<double> lshift;
+    double ltw_ang = 2.0 * M_PI * (double)bds_shift / (double)NCOLOR;
     foralldir(d1) {
         onsites(ALL) {
             plaqw[d1][d1][X] = 0;
-            
-            if (d1 == bdt_dir && X.coordinate(d1) == lattice.size(d1) - 1 && X.coordinate(e_t) == 0) {
-                shift[d1][X].polar((ftype)1, -ltw_ang);
+            if (d1 == bdt_dir && X.coordinate(e_t) == 0 &&
+                X.coordinate(d1) == lattice.size(d1) - 1) {
+                shift[d1][X].polar(1.0, -ltw_ang);
+                lshift[d1][X] = -ltw_ang;
             } else {
                 shift[d1][X] = 1.0;
+                lshift[d1][X] = 0;
             }
         }
         foralldir(d2) if (d1 < d2) {
@@ -1156,7 +1204,7 @@ int main(int argc, char **argv) {
         }
     }
 
-    ftype surface_level = (ftype)ltw_ang / 2;
+    double surface_level = ltw_ang / 2;
     hila::out0 << string_format("SURFLEV %0.5f\n", surface_level);
 
     bool first_pow = true;
@@ -1187,59 +1235,133 @@ int main(int argc, char **argv) {
         if (trajectory >= 0) {
             if (p.n_surf_spec && (trajectory + 1) % p.n_surf_spec == 0) {
                 int64_t idump = (trajectory + 1) / p.n_surf_spec;
+                if (p.use_logsmear == 0) {
+                    // normal smearing
+                    Field<Complex<double>> smS, tsmS, tsmS2;
 
-                Field<Complex<double>> smS, tsmS, tsmS2;
+                    measure_polyakov_field_complex(U[e_t], smS);
 
-                measure_polyakov_field_complex(U[e_t], smS);
-
-                int n_smear = 0;
-                Complex<double> cshift;
-                cshift.polar(1.0, ltw_ang / 2);
-                for (int ism = 0; ism < p.n_smear.size(); ++ism) {
-                    int smear = p.n_smear[ism];
-                    smear_spat_field(smS, shift, p.smear_coeff, smear - n_smear, cshift);
-                    n_smear = smear;
-                    onsites(ALL) if (X.coordinate(e_t) == 0) {
-                        tsmS[X] = smS[X];
-                    } 
-                    if (p.z_smear[ism] > 0) {
-                        for (int j = 0; j < p.z_smear[ism]; j++) {
-                            onsites(ALL) if (X.coordinate(e_t) == 0) {
-                                tsmS2[X] =
-                                    tsmS[X] +
-                                    p.smear_coeff *
-                                        (tsmS[X + bdt_dir] * conj(shift[bdt_dir][X]) +
-                                         tsmS[X - bdt_dir] * shift[bdt_dir][X - bdt_dir]);
-                            }
-                            onsites(ALL) if (X.coordinate(e_t) == 0) {
-                                tsmS[X] = tsmS2[X] / (1 + 2 * p.smear_coeff);
-                            }
-                        }
-                    }
-                    if(n_smear > 0) {
-                        measure_interface_spectrum(tsmS, bdt_dir, surface_level, bds_shift, n_smear,
-                                                   idump, p, first_pow);
-                    }
-
-                    measure_interface_spectrum_ft(smS, bdt_dir, bds_shift, n_smear, idump, p,
-                                                  first_pow);
-
-                    if (p.n_dump_polyakov && (trajectory + 1) % p.n_dump_polyakov == 0) {
-                        Field<float> pl;
-                        onsites(ALL) {
-                            if (X.coordinate(e_t) == 0) {
-                                pl[X] = proj_to_nrange((float)smS[X].arg() - ltw_ang / 2) + ltw_ang / 2;
-                            } else {
-                                pl[X] = 0;
+                    int n_smear = 0;
+                    for (int ism = 0; ism < p.n_smear.size(); ++ism) {
+                        int smear = p.n_smear[ism];
+                        smear_spat_field(smS, shift, p.smear_coeff, smear - n_smear);
+                        n_smear = smear;
+                        onsites(ALL) if (X.coordinate(e_t) == 0) {
+                            tsmS[X] = smS[X];
+                        } 
+                        if (p.z_smear[ism] > 0) {
+                            for (int j = 0; j < p.z_smear[ism]; j++) {
+                                onsites(ALL) if (X.coordinate(e_t) == 0) {
+                                    tsmS2[X] =
+                                        tsmS[X] +
+                                        p.smear_coeff *
+                                            (tsmS[X + bdt_dir] * conj(shift[bdt_dir][X]) +
+                                            tsmS[X - bdt_dir] * shift[bdt_dir][X - bdt_dir]);
+                                }
+                                onsites(ALL) if (X.coordinate(e_t) == 0) {
+                                    tsmS[X] = tsmS2[X] / (1 + 2 * p.smear_coeff);
+                                }
                             }
                         }
+                        if(n_smear > 0) {
+                            measure_interface_spectrum(tsmS, bdt_dir, surface_level, n_smear, idump,
+                                                       p, first_pow);
+                        }
 
-                        int icdump = (trajectory + 1) / p.n_dump_polyakov;
-                        std::string dump_file =
-                            string_format("poly_dump_%04d_nsm%04d", icdump, n_smear);
-                        pl.config_slice_write(dump_file, {-1, -1, -1, 0});
+                        measure_interface_spectrum_ft(smS, bdt_dir, bds_shift, n_smear, idump, p,
+                                                    first_pow);
+
+                        if (p.n_dump_polyakov && (trajectory + 1) % p.n_dump_polyakov == 0) {
+                            Field<float> pl;
+                            onsites(ALL) {
+                                if (X.coordinate(e_t) == 0) {
+                                    pl[X] = proj_to_range((float)smS[X].arg() - surface_level) + surface_level;
+                                } else {
+                                    pl[X] = 0;
+                                }
+                            }
+
+                            int icdump = (trajectory + 1) / p.n_dump_polyakov;
+                            std::string dump_file =
+                                string_format("poly_dump_%04d_nsm%04d", icdump, n_smear);
+                            pl.config_slice_write(dump_file, {-1, -1, -1, 0});
+                        }
+                    }
+                } else {
+                    // logarithmic smearing
+                    Field<Complex<double>> smS, tsmS, tsmS2;
+
+                    measure_polyakov_field_complex(U[e_t], smS);
+                    smear_spat_field(smS, shift, p.smear_coeff, p.n_presmear);
+
+                    onsites(ALL) {
+                        if (X.coordinate(e_t) == 0 && abs(smS[X]) > 0) {
+                            smS[X] = Complex<double>(log(abs(smS[X])),
+                                                     proj_to_range(arg(smS[X]) - surface_level) +
+                                                         surface_level);
+                        } else {
+                            smS[X] = 0;
+                        }
+                    }
+
+                    int n_smear = p.n_presmear;
+                    for (int ism = 0; ism < p.n_smear.size(); ++ism) {
+                        int smear = p.n_smear[ism];
+                        smear_spat_field_l(smS, lshift, p.smear_coeff, smear - n_smear);
+                        if(smear > n_smear) {
+                            n_smear = smear;
+                        }
+                        onsites(ALL) if (X.coordinate(e_t) == 0) {
+                            tsmS[X] = smS[X];
+                        }
+                        if (p.z_smear[ism] > 0) {
+                            for (int j = 0; j < p.z_smear[ism]; j++) {
+                                onsites(ALL) if (X.coordinate(e_t) == 0) {
+                                    tsmS2[X] =
+                                        tsmS[X] +
+                                        p.smear_coeff *
+                                            (tsmS[X + bdt_dir] -
+                                             Complex<double>(0, lshift[bdt_dir][X]) +
+                                             tsmS[X - bdt_dir] +
+                                             Complex<double>(0, lshift[bdt_dir][X - bdt_dir]));
+                                }
+                                onsites(ALL) if (X.coordinate(e_t) == 0) {
+                                    tsmS[X] = tsmS2[X] / (1 + 2 * p.smear_coeff);
+                                }
+                            }
+                        }
+                        if (n_smear > 0) {
+                            onsites(ALL) if (X.coordinate(e_t) == 0) {
+                                tsmS2[X].polar(exp(tsmS[X].real()), tsmS[X].imag()); 
+                            }
+                            measure_interface_spectrum(tsmS2, bdt_dir, surface_level, n_smear,
+                                                           idump, p, first_pow);
+                        }
+                        onsites(ALL) if (X.coordinate(e_t) == 0) {
+                            tsmS2[X].polar(exp(smS[X].real()), smS[X].imag());
+                        }
+                        measure_interface_spectrum_ft(tsmS2, bdt_dir, bds_shift, n_smear, idump, p,
+                                                      first_pow);
+
+                        if (p.n_dump_polyakov && (trajectory + 1) % p.n_dump_polyakov == 0) {
+                            Field<float> pl;
+                            onsites(ALL) {
+                                if (X.coordinate(e_t) == 0) {
+                                    pl[X] = smS[X].imag();
+                                } else {
+                                    pl[X] = 0;
+                                }
+                            }
+
+                            int icdump = (trajectory + 1) / p.n_dump_polyakov;
+                            std::string dump_file =
+                                string_format("poly_dump_%04d_nsm%04d", icdump, n_smear);
+                            pl.config_slice_write(dump_file, {-1, -1, -1, 0});
+                        }
                     }
                 }
+
+
                 first_pow = false;
 
             }
