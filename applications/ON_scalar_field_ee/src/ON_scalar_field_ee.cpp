@@ -33,6 +33,134 @@ struct parameters {
 };
 
 
+template <typename T, typename atype = hila::arithmetic_type<T>>
+void bwrite_to_file(std::string fname, const std::vector<T> &dat, parameters &p, int idump) {
+
+    static bool first = true;
+    if (hila::myrank() == 0) {
+        std::ofstream ofile;
+
+        if (first) {
+            first = false;
+            if (filesys_ns::exists(fname)) {
+                // if file exists: make sure 
+                std::string fname_temp = fname + "_temp";
+                filesys_ns::rename(fname, fname_temp);
+                std::ifstream ifile;
+                ifile.open(fname_temp, std::ios::in | std::ios::binary);
+                ofile.open(fname, std::ios::out | std::ios::binary);
+
+                // header info:
+                // NCOLOR,
+                // NDIM,
+                // lattice.size(0), ..., lattice.size(NDIM - 1),
+                // sizeof(double),
+                // dat.size(),
+                // sizeof(T),
+                // sizeof(atype),
+                // p.s,
+                // p.kappa,
+                // p.lambda,
+                // p.source(0), ..., p.source(NCOLOR -1),
+                // p.l,
+                // p.lc,
+                // p.alpha,
+                // p.dalpha
+                //
+                int64_t *ibuff = (int64_t *)memalloc((NDIM + 7) * sizeof(int64_t));
+                ifile.read((char *)ibuff, (NDIM + 7) * sizeof(int64_t));
+                ofile.write((char *)ibuff, (NDIM + 7) * sizeof(int64_t));
+
+                double *fbuff = (double *)memalloc((NCOLOR + 6) * sizeof(double));
+                ifile.read((char *)fbuff, (NCOLOR + 6) * sizeof(double));
+                ofile.write((char *)fbuff, (NCOLOR + 6) * sizeof(double));
+
+                int buffsize = dat.size() * sizeof(T);
+                atype *buffer = (atype *)memalloc(buffsize);
+
+                while (ifile.good()) {
+                    ifile.read((char *)ibuff, sizeof(int64_t));
+                    int64_t tidump = ibuff[0];
+                    if (ifile.good() && tidump < idump) {
+                        ofile.write((char *)&(tidump), sizeof(int64_t));
+                        ifile.read((char *)buffer, buffsize);
+                        ofile.write((char *)buffer, buffsize);
+                    } else {
+                        break;
+                    }
+                }
+                ifile.close();
+                ofile.close();
+                free(fbuff);
+                free(ibuff);
+                free(buffer);
+                filesys_ns::remove(fname_temp);
+            } else {
+                // header info:
+                // NCOLOR,
+                // NDIM,
+                // lattice.size(0), ..., lattice.size(NDIM - 1),
+                // sizeof(double),
+                // dat.size(),
+                // sizeof(T),
+                // sizeof(atype),
+                // p.s,
+                // p.kappa,
+                // p.lambda,
+                // p.source(0), ..., p.source(NCOLOR -1),
+                // p.l,
+                // p.lc,
+                // p.alpha,
+                // p.dalpha
+                //
+                ofile.open(fname, std::ios::out | std::ios::binary);
+                int64_t *ibuff = (int64_t *)memalloc((NDIM + 7) * sizeof(int64_t));
+                ibuff[0] = NCOLOR;
+                ibuff[1] = NDIM;
+                foralldir(d) {
+                    ibuff[2 + (int)d] = lattice.size(d);
+                }
+                ibuff[NDIM + 2] = sizeof(double);
+                ibuff[NDIM + 3] = dat.size();
+                ibuff[NDIM + 4] = sizeof(T);
+                ibuff[NDIM + 5] = sizeof(atype);
+                ibuff[NDIM + 6] = p.s;
+                ofile.write((char *)ibuff, (NDIM + 7) * sizeof(int64_t));
+
+                double *fbuff = (double *)memalloc((NCOLOR + 6) * sizeof(double));
+                fbuff[0] = p.kappa;
+                fbuff[1] = p.lambda;
+                for (int ic = 0; ic < NCOLOR; ++ic) {
+                    fbuff[2 + ic] = p.source[ic];
+                }
+                fbuff[NCOLOR + 2] = p.l;
+                fbuff[NCOLOR + 3] = p.lc;
+                fbuff[NCOLOR + 4] = p.alpha;
+                fbuff[NCOLOR + 5] = p.dalpha;
+                ofile.write((char *)fbuff, (NCOLOR + 6) * sizeof(double));
+
+
+                ofile.close();
+                free(fbuff);
+                free(ibuff);
+            }
+        }
+
+
+        ofile.open(fname, std::ios::out | std::ios_base::app | std::ios::binary);
+
+        ofile.write((char *)&(idump), sizeof(int64_t));
+        
+        for (int ic = 0; ic < dat.size(); ++ic) {
+            ofile.write((char *)&(dat[ic]), sizeof(T));
+        }
+
+        ofile.close();
+
+    }
+}
+
+
 template <typename T, typename pT, typename atype = hila::arithmetic_type<T>>
 void move_filtered_p(const Field<T> (&S)[2], const Field<pT> &bcmsid, const Direction &d, const Parity &par,
                      bool both_dirs, out_only Field<T> &Sd, const parameters &p) {
@@ -381,48 +509,61 @@ void do_interp_hb_trajectory(Field<T> (&S)[2], const Field<pT> &bcmsid, paramete
 }
 
 template <typename T, typename pT, typename atype = hila::arithmetic_type<T>>
-void do_hbbc_measure(Field<T> (&S)[2], const Field<pT> &bcmsid, parameters &p) {
+void do_hbbc_measure(Field<T> (&S)[2], const Field<pT> &bcmsid, parameters &p, std::vector<atype> &ds, bool output = false) {
 
     auto alpha = p.alpha;
 
-    atype ds = 0;
+
+    ds.resize(2);
+    ds[0] = 0;
+    ds[1] = 0;
+
     Field<T> S_old = S[0];
 
     static bool first = true;
     if (first) {
-        // print legend for measurement output
-        hila::out0 << "LHBBC:         DIR              dS_EXT          TIME\n";
+        if(output) {
+            // print legend for measurement output
+            hila::out0 << "LHBBC:         DIR              dS_EXT          TIME\n";
+        }
         first = false;
     }
 
     ftype ttime = hila::gettime();
-    ftype tttime;
-
     int ipdir;
     if (p.alpha == 0) {
         ipdir = 1;
-        do_interp_hb_trajectory(S, bcmsid, p, ipdir, ds);
+        do_interp_hb_trajectory(S, bcmsid, p, ipdir, ds[0]);
+        if (output) {
+            hila::out0 << string_format("HBBC            % 1d % 0.12e    % 10.5f\n", ipdir, ds[0],
+                                        hila::gettime() - ttime);
+        }
     } else if (p.alpha == 1) {
         ipdir = -1;
-        do_interp_hb_trajectory(S, bcmsid, p, ipdir, ds);
+        do_interp_hb_trajectory(S, bcmsid, p, ipdir, ds[1]);
+        if (output) {
+            hila::out0 << string_format("HBBC            % 1d % 0.12e    % 10.5f\n", ipdir, ds[1],
+                                        hila::gettime() - ttime);
+        }
     } else {
         p.alpha = 0.5;
         ipdir = 1;
-        do_interp_hb_trajectory(S, bcmsid, p, ipdir, ds);
-        tttime = hila::gettime();
-        hila::out0 << string_format("HBBC            % 1d % 0.12e    % 10.5f\n", ipdir, ds,
-                                    tttime - ttime);
+        do_interp_hb_trajectory(S, bcmsid, p, ipdir, ds[0]);
+        ftype tttime = hila::gettime();
+        if (output) {
+            hila::out0 << string_format("HBBC            % 1d % 0.12e    % 10.5f\n", ipdir, ds[0],
+                                        tttime - ttime);
+        }
         ttime = tttime;
-        ds = 0;
         S[0] = S_old;
         p.alpha = 0.5;
         ipdir = -1;
-        do_interp_hb_trajectory(S, bcmsid, p, ipdir, ds);
+        do_interp_hb_trajectory(S, bcmsid, p, ipdir, ds[1]);
+        if (output) {
+            hila::out0 << string_format("HBBC            % 1d % 0.12e    % 10.5f\n", ipdir, ds[1],
+                                        hila::gettime() - ttime);
+        }
     }
-
-    hila::out0 << string_format("HBBC            % 1d % 0.12e    % 10.5f\n", ipdir, ds,
-                                hila::gettime() - ttime);
-
 
     S[0] = S_old;
     p.alpha = alpha;
@@ -708,6 +849,23 @@ int main(int argc, char **argv) {
         bcmsid[X] = sknorm;
     }
 
+    std::string output_fname = string_format("O%d", NCOLOR);
+    output_fname += string_format("_d%d", NDIM);
+    foralldir(d) {
+        output_fname += string_format("_%d", lattice.size(d));
+    }
+    output_fname += string_format("_h%.6f", p.kappa);
+    output_fname += string_format("_lm%.6f", p.lambda);
+    output_fname += string_format("_s%.6f", p.source[0]);
+    for (int ic = 1; ic < NCOLOR; ++ic) {
+        output_fname += string_format("_%.6f", p.source[ic]);
+    }
+    output_fname += string_format("_r%d", p.s);
+    output_fname += string_format("_l%.6f", p.l);
+    output_fname += string_format("_lc%.6f", p.lc);
+
+    std::string ds_output_fname = output_fname + "_ds.bout";
+
 
     // use negative trajectory for thermal
     int start_traj = -p.n_therm;
@@ -744,8 +902,11 @@ int main(int argc, char **argv) {
 
         measure_stuff(S, bcmsid, p);
 
-        if (p.s>1 && trajectory >= 0 && p.n_interp_steps > 0) {
-            do_hbbc_measure(S, bcmsid, p);
+        if (p.s > 1 && trajectory >= 0 && p.n_interp_steps > 0) {
+            std::vector<double> ds(2, 0);
+            do_hbbc_measure(S, bcmsid, p, ds);
+
+            bwrite_to_file(ds_output_fname, ds, p, trajectory);
         }
 
         hila::out0 << "Measure_end " << trajectory << '\n';

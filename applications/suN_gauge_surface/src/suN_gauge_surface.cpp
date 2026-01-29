@@ -398,7 +398,7 @@ bool measure_interface_ft(const Field<sT> &smS, Direction dz, std::vector<aT> &s
         }
     }
     Complex<sT> ftn;
-    sT midz = 0.0;
+    sT meanz = 0;
     for (int y = 0; y < size_y; ++y) {
         yslice[dy] = y;
         lS = smS.get_slice(yslice);
@@ -408,17 +408,17 @@ bool measure_interface_ft(const Field<sT> &smS, Direction dz, std::vector<aT> &s
                 for (int z = 0; z < lattice.size(dz); z++) {
                     ftn += lS[x + size_x * z] * ft_basis[z];
                 }
-                sT ftres = (sT)arg(ftn) * (sT)lattice.size(dz) / (2.0 * M_PI);
-                if(ftres < 0) {
-                    ftres += (sT)lattice.size(dz);
+                sT midz = (sT)arg(ftn) * (sT)lattice.size(dz) / (2.0 * M_PI);
+                if (midz < 0) {
+                    midz += (sT)lattice.size(dz);
                 }
-                surf[x + y * size_x] = M_SQRT2 * ftres;
-                midz += ftres;
+                surf[x + y * size_x] = M_SQRT2 * midz;
+                meanz += midz;
             }
         }
     }
-    midz /= area;
-    hila::out0 << string_format("ft z_mid=% 0.4f\n", midz);
+    meanz /= area;
+    hila::out0 << string_format("ft z_mid=% 0.4f\n", meanz);
     return true;
 }
 
@@ -432,14 +432,6 @@ bool measure_interface_spectrum_ft(const Field<sT> &smS, Direction dir_z, int ns
     bool ok = measure_interface_ft(smS, dir_z, surf, size_x, size_y);
 
     if (hila::myrank() == 0) {
-        if (false) {
-            for (int x = 0; x < size_x; ++x) {
-                for (int y = 0; y < size_y; ++y) {
-                    hila::out0 << "SURF" << nsm << ' ' << x << ' ' << y << ' '
-                               << surf[x + y * size_x] << '\n';
-                }
-            }
-        }
         constexpr int pow_size = 200;
         std::vector<double> npow(pow_size, 0);
         std::vector<int> hits(pow_size, 0);
@@ -1265,12 +1257,10 @@ int main(int argc, char **argv) {
 
             if (p.n_dump_polyakov && (trajectory + 1) % p.n_dump_polyakov == 0) {
                 Field<float> pl;
-                std::ofstream poly;
-                if (hila::myrank() == 0) {
-                    poly.open("polyakov", std::ios::out | std::ios::app);
-                }
                 measure_polyakov_field(U[e_t], pl);
-                pl.write_slice(poly, {-1, -1, -1, 0});
+                int icdump = (trajectory + 1) / p.n_dump_polyakov;
+                std::string dump_file = string_format("poly_dump_%04d", icdump);
+                pl.config_slice_write(dump_file, {-1, -1, -1, 0});
             }
         }
 

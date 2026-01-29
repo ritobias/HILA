@@ -9,6 +9,8 @@ settings.json
 .vscode/
 *.cpt
 *.o
+*.bout
+*.out
 *~
 #*#
 .VSCodeCounter/*
