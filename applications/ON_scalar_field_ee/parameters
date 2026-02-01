@@ -14,6 +14,8 @@ heatbath updates       100
 number of hb hits      10
 thermalization trajs   1000
 interpolation steps    500
+trajs/corr dump        10
+trajs/config dump      1000
 random seed            0
 trajs/saved            100
 config name            config

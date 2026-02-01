@@ -9,6 +9,7 @@
 
 using ftype = double;
 using fT = Vector<NCOLOR, ftype>;
+using fTf = Vector<NCOLOR, float>;
 
 // define a struct to hold the input parameters: this
 // makes it simpler to pass the values around
@@ -27,16 +28,17 @@ struct parameters {
     int n_heatbath;     // number of heat-bath sweeps per "trajectory"
     int n_multhits;     // number of corrected heat-bath hits per update
     int n_interp_steps; // number of interpolation steps to change alpha from 0 to 1
+    int n_dump_corr;    // number of trajectories between correlator and condensate dumps
+    int n_dump_config;  // number of trajectories between config. dumps
     int n_save;         // number of trajectories between config. check point
     std::string config_file;
     ftype time_offset;
 };
 
 
-template <typename T, typename atype = hila::arithmetic_type<T>>
-void bwrite_to_file(std::string fname, const std::vector<T> &dat, parameters &p, int idump) {
+template <typename T, typename iT, typename atype = hila::arithmetic_type<T>>
+void bwrite_to_file(std::string fname, const std::vector<T> &dat, parameters &p, iT idump, bool first) {
 
-    static bool first = true;
     if (hila::myrank() == 0) {
         std::ofstream ofile;
 
@@ -148,9 +150,9 @@ void bwrite_to_file(std::string fname, const std::vector<T> &dat, parameters &p,
 
 
         ofile.open(fname, std::ios::out | std::ios_base::app | std::ios::binary);
+        int64_t tidump = (int64_t)idump;
+        ofile.write((char *)&(tidump), sizeof(int64_t));
 
-        ofile.write((char *)&(idump), sizeof(int64_t));
-        
         for (int ic = 0; ic < dat.size(); ++ic) {
             ofile.write((char *)&(dat[ic]), sizeof(T));
         }
@@ -477,6 +479,116 @@ double measure_ds_dalpha(const Field<T> (&S)[2], const Field<pT> &bcmsid, const 
 }
 
 template <typename T, typename pT, typename atype = hila::arithmetic_type<T>>
+void measure_wall_wall_corr_vs_dist(const Field<T> (&S)[2], const Field<pT> &bcmsid, Direction d,
+                                    const parameters &p,
+                                    std::vector<Matrix<NCOLOR, NCOLOR, atype>> &res) {
+
+    Field<Matrix<NCOLOR, NCOLOR, atype>> fS;
+    Field<fT> tS[2][2];
+    tS[0][0] = 0;
+    tS[0][1].make_ref_to(tS[0][0], 1);
+    tS[1][0] = 0;
+    tS[1][1].make_ref_to(tS[1][0], 1);
+    int nt = lattice.size(NDIM - 1);
+    int nd = lattice.size(d);
+    res.resize(nt * nd);
+
+    ReductionVector<Matrix<NCOLOR, NCOLOR, double>> corr(nt, 0);
+    corr.allreduce(false).delayed(true);
+
+    int ip = 0;
+    onsites(ALL) {
+        tS[ip][0][X] = S[0][X];
+    }
+    onsites(ALL) {
+        fS[X] = S[0][X].outer_product(tS[ip][0][X]);
+    }
+    onsites(ALL) {
+        corr[X.coordinate(Direction(NDIM - 1))] += fS[X];
+    }
+    corr.reduce();
+    for (int it = 0; it < nt; ++it) {
+        res[it * nd] = corr[it] / (lattice.volume() / nt);
+        corr[it] = 0;
+    }
+
+    for (int ir = 1; ir < nd; ++ir) {
+        if(d < NDIM - 1) {
+            onsites(ALL) {
+                tS[1 - ip][0][X] = tS[ip][0][X + d];
+            }
+        } else {
+            move_filtered(tS[ip], bcmsid, d, ALL, false, tS[1 - ip][0], p);
+        }
+        ip = 1 - ip;
+
+        onsites(ALL) {
+            fS[X] = S[0][X].outer_product(tS[ip][0][X]);
+        }
+        onsites(ALL) {
+            corr[X.coordinate(Direction(NDIM - 1))] += fS[X];
+        }
+        corr.reduce();
+        for (int it = 0; it < nt; ++it) {
+            res[it * nd + ir] = corr[it] / (lattice.volume() / nt);
+            corr[it] = 0;
+        }
+    }
+}
+
+template <typename T, typename atype = hila::arithmetic_type<T>>
+void measure_wall_wall_corr(const Field<T> &S, Direction d,
+                            const parameters &p,
+                            std::vector<Matrix<NCOLOR, NCOLOR, atype>> &res) {
+
+    Field<Matrix<NCOLOR, NCOLOR, atype>> fS;
+    Field<fT> tS[2];
+    tS[0].set_nn_topo(1);
+    tS[1].set_nn_topo(1);
+    int nt = lattice.size(NDIM - 1);
+    int nd = lattice.size(d);
+    res.resize(nt * nd);
+
+    ReductionVector<Matrix<NCOLOR, NCOLOR, double>> corr(nt, 0);
+    corr.allreduce(false).delayed(true);
+
+    int ip = 0;
+    onsites(ALL) {
+        tS[ip][X] = S[X];
+    }
+    onsites(ALL) {
+        fS[X] = S[X].outer_product(tS[ip][X]);
+    }
+    onsites(ALL) {
+        corr[X.coordinate(Direction(NDIM - 1))] += fS[X];
+    }
+    corr.reduce();
+    for (int it = 0; it < nt; ++it) {
+        res[it * nd] = corr[it] / (lattice.volume() / nt);
+        corr[it] = 0;
+    }
+
+    for (int ir = 1; ir < nd; ++ir) {
+        onsites(ALL) {
+            tS[1 - ip][X] = tS[ip][X + d];
+        }
+        ip = 1 - ip;
+
+        onsites(ALL) {
+            fS[X] = S[X].outer_product(tS[ip][X]);
+        }
+        onsites(ALL) {
+            corr[X.coordinate(Direction(NDIM - 1))] += fS[X];
+        }
+        corr.reduce();
+        for (int it = 0; it < nt; ++it) {
+            res[it * nd + ir] = corr[it] / (lattice.volume() / nt);
+            corr[it] = 0;
+        }
+    }
+}
+
+template <typename T, typename pT, typename atype = hila::arithmetic_type<T>>
 void do_interp_hb_trajectory(Field<T> (&S)[2], const Field<pT> &bcmsid, parameters &p,
                              int interp_dir, out_only atype &ds) {
 
@@ -576,19 +688,6 @@ void measure_stuff(const Field<T> (&S)[2], const Field<pT> &bcmsid, const parame
     if (first) {
         // print legend for measurement output
         hila::out0 << "LMEAS:         s_kin             s                  dS\n";
-        if(false) {
-            for (int i = 0; i < T::size(); ++i) {
-                hila::out0 << "LCOND "<<i<<":        cond\n";
-            }
-            for (int i = 0; i < T::size(); ++i) {
-                for (int j = 0; j < T::size(); ++j) {
-                    hila::out0 << "LCORR " << i << " " << j << ":";
-                    for (int ti = 0; ti < lattice.size(NDIM - 1) / p.s; ++ti) {
-                        hila::out0 << string_format("       t=% 3d", ti);
-                    }
-                }
-            }
-        }
         first = false;
     }
     double s_kin = 0;
@@ -603,8 +702,8 @@ void measure_stuff(const Field<T> (&S)[2], const Field<pT> &bcmsid, const parame
 ///////////////////////////////////////////////////////////////////////////////////
 // load/save config functions
 
-    template <typename T>
-    void checkpoint(const Field<T> &S, int trajectory, const parameters &p) {
+template <typename T>
+void checkpoint(const Field<T> &S, int trajectory, const parameters &p) {
     double t = hila::gettime();
     // name of config with extra suffix
     std::string config_file =
@@ -806,6 +905,10 @@ int main(int argc, char **argv) {
     p.n_therm = par.get("thermalization trajs");
     // number of alpha-interpolation steps
     p.n_interp_steps = par.get("interpolation steps");
+    // number of trajectories per correlator dump
+    p.n_dump_corr = par.get("trajs/corr dump");
+    // number of trajectories per configuration dump
+    p.n_dump_config = par.get("trajs/config dump");
     // random seed = 0 -> get seed from time
     long seed = par.get("random seed");
     // save config and checkpoint
@@ -866,13 +969,32 @@ int main(int argc, char **argv) {
 
     std::string ds_output_fname = output_fname + "_ds.bout";
 
+    std::string corr_output_fname[NDIM];
+    std::vector<Matrix<NCOLOR, NCOLOR, ftype>> av_corr[NDIM];
+    foralldir(d) {
+        corr_output_fname[d] = output_fname + string_format("_wwcorr_d%d.bout", (int)d);
+        av_corr[d].resize(lattice.size(NDIM - 1) * lattice.size(d));
+        for (int ic = 0; ic < av_corr[d].size(); ++ic) {
+            av_corr[d][ic] = 0;
+        }
+    }
+
+    std::string corr_vs_dist_output_fname[NDIM];
+    std::vector<Matrix<NCOLOR, NCOLOR, ftype>> av_corr_vs_dist[NDIM];
+    foralldir(d) {
+        corr_vs_dist_output_fname[d] = output_fname + string_format("_wwcorr_vs_dist_d%d.bout", (int)d);
+        av_corr_vs_dist[d].resize(lattice.size(NDIM - 1) * lattice.size(d));
+        for (int ic = 0; ic < av_corr_vs_dist[d].size(); ++ic) {
+            av_corr_vs_dist[d][ic] = 0;
+        }
+    }
 
     // use negative trajectory for thermal
     int start_traj = -p.n_therm;
 
-    // Alloc field (S) and momentum field (E)
+    // Alloc field (S) 
     Field<fT> S[2];
-    Field<fT> E, S_back = 0;
+    Field<fT> S_back = 0;
 
     if (!restore_checkpoint(S[0], start_traj, p)) {
         S[0] = 0;
@@ -883,7 +1005,8 @@ int main(int argc, char **argv) {
     hila::timer measure_timer("Measurements");
 
     double act_old, act_new, s_old, s_new;
-
+    bool first = true;
+    bool first_corr = true;
     for (int trajectory = start_traj; trajectory <= p.n_traj; ++trajectory) {
 
         ftype ttime = hila::gettime();
@@ -902,16 +1025,70 @@ int main(int argc, char **argv) {
 
         measure_stuff(S, bcmsid, p);
 
-        if (p.s > 1 && trajectory >= 0 && p.n_interp_steps > 0) {
-            std::vector<double> ds(2, 0);
-            do_hbbc_measure(S, bcmsid, p, ds);
-
-            bwrite_to_file(ds_output_fname, ds, p, trajectory);
+        if (p.s > 1 && trajectory >= 0) {
+            if (p.n_interp_steps > 0) {
+                std::vector<double> ds(2, 0);
+                do_hbbc_measure(S, bcmsid, p, ds);
+                bwrite_to_file(ds_output_fname, ds, p, trajectory, first);
+                first = false;
+            }
+            if (p.n_dump_corr) {
+                foralldir(d) {
+                    std::vector<Matrix<NCOLOR, NCOLOR, ftype>> corr;
+                    //hila::out0 << "measure_wall_wall_corr in " << d << "-dir"  << '\n';
+                    measure_wall_wall_corr(S[1], d, p, corr);
+                    for (int ic = 0; ic < av_corr[d].size(); ++ ic) {
+                        av_corr[d][ic] += corr[ic];
+                    }
+                }
+                foralldir(d) {
+                    std::vector<Matrix<NCOLOR, NCOLOR, ftype>> corr;
+                    //hila::out0 << "measure_wall_wall_corr_vs_dist in " << d << "-dir" << '\n';
+                    measure_wall_wall_corr_vs_dist(S, bcmsid, d, p, corr);
+                    for (int ic = 0; ic < av_corr_vs_dist[d].size(); ++ic) {
+                        av_corr_vs_dist[d][ic] += corr[ic];
+                    }
+                }
+                if((trajectory + 1) % p.n_dump_corr == 0) {
+                    int icdump = (trajectory + 1) / p.n_dump_corr;
+                    foralldir(d) {
+                        for (int ic = 0; ic < av_corr[d].size(); ++ic) {
+                            av_corr[d][ic] /= p.n_dump_corr;
+                        }
+                        bwrite_to_file(corr_output_fname[d], av_corr[d], p, icdump, first_corr);
+                        for (int ic = 0; ic < av_corr[d].size(); ++ic) {
+                            av_corr[d][ic] = 0;
+                        }
+                    }
+                    foralldir(d) {
+                        for (int ic = 0; ic < av_corr_vs_dist[d].size(); ++ic) {
+                            av_corr_vs_dist[d][ic] /= p.n_dump_corr;
+                        }
+                        bwrite_to_file(corr_vs_dist_output_fname[d], av_corr_vs_dist[d], p, icdump, first_corr);
+                        for (int ic = 0; ic < av_corr_vs_dist[d].size(); ++ic) {
+                            av_corr_vs_dist[d][ic] = 0;
+                        }
+                    }
+                    first_corr = false;
+                }
+            }
+            
         }
 
         hila::out0 << "Measure_end " << trajectory << '\n';
 
         measure_timer.stop();
+
+        if (p.n_dump_config && (trajectory + 1) % p.n_dump_config == 0) {
+            Field<fTf> fS;
+            onsites(ALL) {
+                fS[X] = S[0][X];
+            }
+
+            int icdump = (trajectory + 1) / p.n_dump_config;
+            std::string cdump_file = output_fname + string_format("_conf%04d.bout", icdump);
+            fS.config_write(cdump_file);
+        }
 
         if (p.n_save > 0 && (trajectory + 1) % p.n_save == 0) {
             checkpoint(S[0], trajectory, p);
