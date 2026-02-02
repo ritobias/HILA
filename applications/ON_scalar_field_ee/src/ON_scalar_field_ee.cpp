@@ -538,7 +538,6 @@ void measure_wall_wall_corr_vs_dist(const Field<T> (&S)[2], const Field<pT> &bcm
 
 template <typename T, typename atype = hila::arithmetic_type<T>>
 void measure_wall_wall_corr(const Field<T> &S, Direction d,
-                            const parameters &p,
                             std::vector<Matrix<NCOLOR, NCOLOR, atype>> &res) {
 
     Field<Matrix<NCOLOR, NCOLOR, atype>> fS;
@@ -587,6 +586,26 @@ void measure_wall_wall_corr(const Field<T> &S, Direction d,
         }
     }
 }
+
+
+template <typename T, typename atype = hila::arithmetic_type<T>>
+void measure_cond(const Field<T> &S, std::vector<T> &res) {
+
+    int nt = lattice.size(NDIM - 1);
+    res.resize(nt);
+
+    ReductionVector<Vector<NCOLOR, double>> cond(nt, 0);
+    cond.allreduce(false).delayed(true);
+
+    onsites(ALL) {
+        cond[X.coordinate(Direction(NDIM - 1))] += S[X];
+    }
+    cond.reduce();
+    for (int it = 0; it < nt; ++it) {
+        res[it] = cond[it] / (lattice.volume() / nt);
+    }
+}
+
 
 template <typename T, typename pT, typename atype = hila::arithmetic_type<T>>
 void do_interp_hb_trajectory(Field<T> (&S)[2], const Field<pT> &bcmsid, parameters &p,
@@ -687,7 +706,7 @@ void measure_stuff(const Field<T> (&S)[2], const Field<pT> &bcmsid, const parame
     static bool first = true;
     if (first) {
         // print legend for measurement output
-        hila::out0 << "LMEAS:         s_kin             s                  dS\n";
+        hila::out0 << "LMEAS:         s_kin               s                  dS\n";
         first = false;
     }
     double s_kin = 0;
@@ -969,6 +988,14 @@ int main(int argc, char **argv) {
 
     std::string ds_output_fname = output_fname + "_ds.bout";
 
+    std::string cond_output_fname;
+    std::vector<fT> av_cond;
+    cond_output_fname = output_fname + "_cond.bout";
+    av_cond.resize(lattice.size(NDIM - 1));
+    for (int ic = 0; ic < av_cond.size(); ++ic) {
+        av_cond[ic] = 0;
+    }
+    
     std::string corr_output_fname[NDIM];
     std::vector<Matrix<NCOLOR, NCOLOR, ftype>> av_corr[NDIM];
     foralldir(d) {
@@ -1033,10 +1060,16 @@ int main(int argc, char **argv) {
                 first = false;
             }
             if (p.n_dump_corr) {
+                std::vector<fT> cond;
+                // hila::out0 << "measure_cond " << '\n';
+                measure_cond(S[1], cond);
+                for (int ic = 0; ic < av_cond.size(); ++ic) {
+                    av_cond[ic] += cond[ic];
+                }
                 foralldir(d) {
                     std::vector<Matrix<NCOLOR, NCOLOR, ftype>> corr;
                     //hila::out0 << "measure_wall_wall_corr in " << d << "-dir"  << '\n';
-                    measure_wall_wall_corr(S[1], d, p, corr);
+                    measure_wall_wall_corr(S[1], d, corr);
                     for (int ic = 0; ic < av_corr[d].size(); ++ ic) {
                         av_corr[d][ic] += corr[ic];
                     }
@@ -1051,6 +1084,15 @@ int main(int argc, char **argv) {
                 }
                 if((trajectory + 1) % p.n_dump_corr == 0) {
                     int icdump = (trajectory + 1) / p.n_dump_corr;
+
+                    for (int ic = 0; ic < av_cond.size(); ++ic) {
+                        av_cond[ic] /= p.n_dump_corr;
+                    }
+                    bwrite_to_file(cond_output_fname, av_cond, p, icdump, first_corr);
+                    for (int ic = 0; ic < av_cond.size(); ++ic) {
+                        av_cond[ic] = 0;
+                    }
+
                     foralldir(d) {
                         for (int ic = 0; ic < av_corr[d].size(); ++ic) {
                             av_corr[d][ic] /= p.n_dump_corr;
