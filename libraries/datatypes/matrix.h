@@ -610,7 +610,7 @@ class Matrix_t {
 
     // Assign from "scalar" for square matrix
 
-    template <typename S, std::enable_if_t<hila::is_assignable<T &, S>::value && n == m, int> = 0>
+    template <typename S, std::enable_if_t<hila::is_assignable<T &, S>::value && n == m && n != 1, int> = 0>
     inline auto &operator=(const S rhs) out_only & {
 
         for (int i = 0; i < n; i++)
