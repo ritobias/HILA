@@ -29,6 +29,7 @@ struct parameters {
     int n_multhits;     // number of corrected heat-bath hits per update
     int n_interp_steps; // number of interpolation steps to change alpha from 0 to 1
     int n_dump_corr;    // number of trajectories between correlator and condensate dumps
+    int n_dump_mom_corr;// number of trajectories between momentum mode correlator dumps
     int n_dump_config;  // number of trajectories between config. dumps
     int n_save;         // number of trajectories between config. check point
     std::string config_file;
@@ -491,7 +492,9 @@ void measure_wall_wall_corr_vs_dist(const Field<T> (&S)[2], const Field<pT> &bcm
     tS[1][1].make_ref_to(tS[1][0], 1);
     int nt = lattice.size(NDIM - 1);
     int nd = lattice.size(d);
-    res.resize(nt * nd);
+    if (hila::myrank() == 0) {
+        res.resize(nt * nd);
+    }
 
     ReductionVector<Matrix<NCOLOR, NCOLOR, double>> corr(nt, 0);
     corr.allreduce(false).delayed(true);
@@ -508,7 +511,9 @@ void measure_wall_wall_corr_vs_dist(const Field<T> (&S)[2], const Field<pT> &bcm
     }
     corr.reduce();
     for (int it = 0; it < nt; ++it) {
-        res[it * nd] = corr[it] / (lattice.volume() / nt);
+        if (hila::myrank() == 0) {
+            res[it * nd] = corr[it] / (lattice.volume() / nt);
+        }
         corr[it] = 0;
     }
 
@@ -530,7 +535,9 @@ void measure_wall_wall_corr_vs_dist(const Field<T> (&S)[2], const Field<pT> &bcm
         }
         corr.reduce();
         for (int it = 0; it < nt; ++it) {
-            res[it * nd + ir] = corr[it] / (lattice.volume() / nt);
+            if (hila::myrank() == 0) {
+                res[it * nd + ir] = corr[it] / (lattice.volume() / nt);
+            }
             corr[it] = 0;
         }
     }
@@ -546,7 +553,9 @@ void measure_wall_wall_corr(const Field<T> &S, Direction d,
     tS[1].set_nn_topo(1);
     int nt = lattice.size(NDIM - 1);
     int nd = lattice.size(d);
-    res.resize(nt * nd);
+    if(hila::myrank() == 0) {
+        res.resize(nt * nd);
+    }
 
     ReductionVector<Matrix<NCOLOR, NCOLOR, double>> corr(nt, 0);
     corr.allreduce(false).delayed(true);
@@ -563,7 +572,9 @@ void measure_wall_wall_corr(const Field<T> &S, Direction d,
     }
     corr.reduce();
     for (int it = 0; it < nt; ++it) {
-        res[it * nd] = corr[it] / (lattice.volume() / nt);
+        if (hila::myrank() == 0) {
+            res[it * nd] = corr[it] / (lattice.volume() / nt);
+        }
         corr[it] = 0;
     }
 
@@ -581,8 +592,77 @@ void measure_wall_wall_corr(const Field<T> &S, Direction d,
         }
         corr.reduce();
         for (int it = 0; it < nt; ++it) {
-            res[it * nd + ir] = corr[it] / (lattice.volume() / nt);
+            if (hila::myrank() == 0) {
+                res[it * nd + ir] = corr[it] / (lattice.volume() / nt);
+            }
             corr[it] = 0;
+        }
+    }
+}
+
+template <typename T, typename atype = hila::arithmetic_type<T>>
+void measure_spat_mom_corr(const Field<T> &S, Direction d1, Direction d2,
+                                           std::vector<Matrix<T::size(), T::size(), Complex<atype>>> &res) {
+
+    Field<Matrix<T::size(), T::size(), Complex<atype>>> fS;
+    CoordinateVector fftdirs;
+    foralldir(d) if (d < NDIM - 1) fftdirs[d] = 1;
+    fftdirs[NDIM - 1] = 0;
+
+    Direction dt = Direction(NDIM - 1);
+
+    Field<Complex<atype>> tS, tSK;
+    Field<Vector<T::size(), Complex<atype>>> SK;
+    SK.set_nn_topo(1);
+    double svol = lattice.volume() / lattice.size(dt);
+    for (int inc = 0; inc < T::size(); inc += 2) {
+        onsites(ALL) {
+            T tvec = S[X];
+            if (inc + 1 < T::size()) {
+                tS[X] = Complex<atype>(tvec[inc], tvec[inc + 1]);
+            } else {
+                tS[X] = Complex<atype>(tvec[inc], 0);
+            }
+        }
+        tS.FFT(fftdirs, tSK);
+
+        onsites(ALL) {
+            Complex<atype> tc = tSK[X] / svol;
+            SK[X][inc] = tc.real();
+            if (inc + 1 < T::size()) {
+                SK[X][inc + 1] = tc.imag();
+            }
+        }
+    }
+
+    int nt = lattice.size(dt);
+    int nd1 = lattice.size(d1) / 2;
+    int nd2 = lattice.size(d2);
+    if (hila::myrank() == 0) {
+        res.resize((nt * (nt + 1)) / 2 * nd1 * nd2);
+    }
+    CoordinateVector slice1(0);
+    CoordinateVector slice2(0);
+
+    slice1[d1] = -1;
+    slice2[d2] = -1;
+
+    std::vector<Vector<T::size(), Complex<atype>>> ls1, ls2;
+    int iit = 0;
+    for (int it1 = 0; it1 < nt; ++it1) {
+        slice1[NDIM - 1] = it1;
+        ls1 = SK.get_slice(slice1);
+        for (int it2 = it1; it2 < nt; ++it2) {
+            slice2[NDIM - 1] = it2;
+            ls2 = SK.get_slice(slice2);
+            if(hila::myrank() == 0) {
+                for (int k1 = 0; k1 < nd1; ++k1) {
+                    for (int k2 = 0; k2 < nd2; ++k2) {
+                        res[(iit * nd1 + k1) * nd2 + k2] = ls1[k1].outer_product(ls2[k2].conj());
+                    }
+                }
+            }
+            ++iit;
         }
     }
 }
@@ -926,6 +1006,8 @@ int main(int argc, char **argv) {
     p.n_interp_steps = par.get("interpolation steps");
     // number of trajectories per correlator dump
     p.n_dump_corr = par.get("trajs/corr dump");
+    // number of trajectories per momentum correlator dump
+    p.n_dump_mom_corr = par.get("trajs/mom corr dump");
     // number of trajectories per configuration dump
     p.n_dump_config = par.get("trajs/config dump");
     // random seed = 0 -> get seed from time
@@ -1000,19 +1082,34 @@ int main(int argc, char **argv) {
     std::vector<Matrix<NCOLOR, NCOLOR, ftype>> av_corr[NDIM];
     foralldir(d) {
         corr_output_fname[d] = output_fname + string_format("_wwcorr_d%d.bout", (int)d);
-        av_corr[d].resize(lattice.size(NDIM - 1) * lattice.size(d));
-        for (int ic = 0; ic < av_corr[d].size(); ++ic) {
-            av_corr[d][ic] = 0;
+        if(hila::myrank() == 0) {
+            av_corr[d].resize(lattice.size(NDIM - 1) * lattice.size(d));
+            for (int ic = 0; ic < av_corr[d].size(); ++ic) {
+                av_corr[d][ic] = 0;
+            }
         }
     }
 
-    std::string corr_vs_dist_output_fname[NDIM];
-    std::vector<Matrix<NCOLOR, NCOLOR, ftype>> av_corr_vs_dist[NDIM];
-    foralldir(d) {
-        corr_vs_dist_output_fname[d] = output_fname + string_format("_wwcorr_vs_dist_d%d.bout", (int)d);
-        av_corr_vs_dist[d].resize(lattice.size(NDIM - 1) * lattice.size(d));
-        for (int ic = 0; ic < av_corr_vs_dist[d].size(); ++ic) {
-            av_corr_vs_dist[d][ic] = 0;
+    std::string corr_vs_dist_output_fname;
+    std::vector<Matrix<NCOLOR, NCOLOR, ftype>> av_corr_vs_dist;
+    corr_vs_dist_output_fname = output_fname + string_format("_wwcorr_vs_dist_d%d.bout", NDIM - 1);
+    if (hila::myrank() == 0) {
+        av_corr_vs_dist.resize(lattice.size(NDIM - 1) * lattice.size(NDIM - 1));
+        for (int ic = 0; ic < av_corr_vs_dist.size(); ++ic) {
+            av_corr_vs_dist[ic] = 0;
+        }
+    }
+
+    std::string mom_corr_output_fname[NDIM][NDIM];
+    std::vector<Matrix<NCOLOR, NCOLOR, Complex<ftype>>> av_mom_corr[NDIM][NDIM];
+    foralldir(d1) foralldir(d2) if (d1 <= d2 && d2 < NDIM - 1) {
+        mom_corr_output_fname[d1][d2] = output_fname + string_format("_mom_corr_d%d%d.bout", (int)d1, (int)d2);
+        if (hila::myrank() == 0) {
+            av_mom_corr[d1][d2].resize((lattice.size(NDIM - 1) * (lattice.size(NDIM - 1) + 1)) / 2 *
+                                       lattice.size(d1) / 2 * lattice.size(d2));
+            for (int ic = 0; ic < av_mom_corr[d1][d2].size(); ++ic) {
+                av_mom_corr[d1][d2][ic] = 0;
+            }
         }
     }
 
@@ -1034,6 +1131,7 @@ int main(int argc, char **argv) {
     double act_old, act_new, s_old, s_new;
     bool first = true;
     bool first_corr = true;
+    bool first_mom_corr = true;
     for (int trajectory = start_traj; trajectory <= p.n_traj; ++trajectory) {
 
         ftype ttime = hila::gettime();
@@ -1074,12 +1172,12 @@ int main(int argc, char **argv) {
                         av_corr[d][ic] += corr[ic];
                     }
                 }
-                foralldir(d) {
+                {
                     std::vector<Matrix<NCOLOR, NCOLOR, ftype>> corr;
                     //hila::out0 << "measure_wall_wall_corr_vs_dist in " << d << "-dir" << '\n';
-                    measure_wall_wall_corr_vs_dist(S, bcmsid, d, p, corr);
-                    for (int ic = 0; ic < av_corr_vs_dist[d].size(); ++ic) {
-                        av_corr_vs_dist[d][ic] += corr[ic];
+                    measure_wall_wall_corr_vs_dist(S, bcmsid, Direction(NDIM - 1), p, corr);
+                    for (int ic = 0; ic < av_corr_vs_dist.size(); ++ic) {
+                        av_corr_vs_dist[ic] += corr[ic];
                     }
                 }
                 if((trajectory + 1) % p.n_dump_corr == 0) {
@@ -1102,16 +1200,37 @@ int main(int argc, char **argv) {
                             av_corr[d][ic] = 0;
                         }
                     }
-                    foralldir(d) {
-                        for (int ic = 0; ic < av_corr_vs_dist[d].size(); ++ic) {
-                            av_corr_vs_dist[d][ic] /= p.n_dump_corr;
-                        }
-                        bwrite_to_file(corr_vs_dist_output_fname[d], av_corr_vs_dist[d], p, icdump, first_corr);
-                        for (int ic = 0; ic < av_corr_vs_dist[d].size(); ++ic) {
-                            av_corr_vs_dist[d][ic] = 0;
-                        }
+                    for (int ic = 0; ic < av_corr_vs_dist.size(); ++ic) {
+                        av_corr_vs_dist[ic] /= p.n_dump_corr;
+                    }
+                    bwrite_to_file(corr_vs_dist_output_fname, av_corr_vs_dist, p, icdump, first_corr);
+                    for (int ic = 0; ic < av_corr_vs_dist.size(); ++ic) {
+                        av_corr_vs_dist[ic] = 0;
                     }
                     first_corr = false;
+                }
+            }
+            if (p.n_dump_mom_corr) {
+                foralldir(d1) foralldir(d2) if(d1 <= d2 && d2 < NDIM - 1) {
+                    std::vector<Matrix<NCOLOR, NCOLOR, Complex<ftype>>> corr;
+                    // hila::out0 << "measure_wall_wall_corr in " << d << "-dir"  << '\n';
+                    measure_spat_mom_corr(S[0], d1, d2, corr);
+                    for (int ic = 0; ic < av_mom_corr[d1][d2].size(); ++ic) {
+                        av_mom_corr[d1][d2][ic] += corr[ic];
+                    }
+                }
+                if ((trajectory + 1) % p.n_dump_mom_corr == 0) {
+                    int icdump = (trajectory + 1) / p.n_dump_mom_corr;
+                    foralldir(d1) foralldir(d2) if(d1 <= d2 && d2 < NDIM -1) {
+                        for (int ic = 0; ic < av_mom_corr[d1][d2].size(); ++ic) {
+                            av_mom_corr[d1][d2][ic] /= p.n_dump_mom_corr;
+                        }
+                        bwrite_to_file(mom_corr_output_fname[d1][d2], av_mom_corr[d1][d2], p, icdump, first_mom_corr);
+                        for (int ic = 0; ic < av_mom_corr[d1][d2].size(); ++ic) {
+                            av_mom_corr[d1][d2][ic] = 0;
+                        }
+                    }
+                    first_mom_corr = false;
                 }
             }
             
