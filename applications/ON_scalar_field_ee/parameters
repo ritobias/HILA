@@ -1,22 +1,22 @@
 # This is a parameter file for ON_scalar_field_ee
 
-lattice size           24,24,48
-kappa                  0.7
-lambda                 2.5
+lattice size           64,128
+kappa                  0.48367003
+lambda                 0.0087726262
 source terms           0
 replica number         2
-momentum scale l       0.5
-momentum scale lc      0.6
+momentum scale l       0.3
+momentum scale lc      0.4
 alpha                  0.5
 dalpha                 0.5
 number of trajectories 10000
 heatbath updates       100
 number of hb hits      10
-thermalization trajs   100
-interpolation steps    500
-trajs/corr dump        10
-trajs/mom corr dump    10
-trajs/config dump      1000
+thermalization trajs   500
+interpolation steps    200
+trajs/corr dump        500
+trajs/mom corr dump    0
+trajs/config dump      500
 random seed            0
-trajs/saved            100
+trajs/saved            500
 config name            config

@@ -909,7 +909,7 @@ public:
             //cn[e_z] -= 1;
             cn[e_y] = lsize[e_y] - 1;
         }
-        if(NDIM > 2) {
+#if NDIM > 2 
             if (cn[e_z] >= lsize[e_z]) {
                 //cn[e_x] += 1;
                 cn[e_z] = 0;
@@ -918,7 +918,7 @@ public:
                 //cn[e_x] -= 1;
                 cn[e_z] = lsize[e_z] - 1;
             }
-        }
+#endif
         if (cn[e_x] >= lsize[e_x]) {
             cn[e_x] = 0;
         }
