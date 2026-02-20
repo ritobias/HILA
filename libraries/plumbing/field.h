@@ -465,10 +465,8 @@ class Field {
         mark_changed(ALL);   // guarantees communications will be done
         fs->assigned_to = 0; // and this means that it is not assigned
         for (Direction d = (Direction)0; d < NDIRS; ++d) {
-
-#if !defined(CUDA) && !defined(HIP)
             fs->neighbours[d] = lattice.neighb[d] + fs->nn_topo * lattice.mynode.volume();
-#else
+#if defined(CUDA) || defined(HIP)
             fs->payload.neighbours[d] =
                 lattice.backend_lattice->d_neighb[d] + fs->nn_topo * lattice.mynode.volume();
 #endif
@@ -535,9 +533,8 @@ class Field {
         mark_changed(ALL); // guarantees communications will be done
 
         for (Direction d = (Direction)0; d < NDIRS; ++d) {
-#if !defined(CUDA) && !defined(HIP)
             fs->neighbours[d] = lattice.neighb[d] + fs->nn_topo * lattice.mynode.volume();
-#else
+#if defined(CUDA) || defined(HIP)
             fs->payload.neighbours[d] =
                 lattice.backend_lattice->d_neighb[d] + fs->nn_topo * lattice.mynode.volume();
 #endif
@@ -782,9 +779,8 @@ class Field {
         }
 
         for (Direction d = (Direction)0; d < NDIRS; ++d) {
-#if !defined(CUDA) && !defined(HIP)
             fs->neighbours[d] = lattice.neighb[d] + fs->nn_topo * lattice.mynode.volume();
-#else
+#if defined(CUDA) || defined(HIP)
             fs->payload.neighbours[d] =
                 lattice.backend_lattice->d_neighb[d] + fs->nn_topo * lattice.mynode.volume();
 #endif

@@ -280,7 +280,8 @@ void move_filtered(const Field<T> (&S)[2], const Field<pT> &bcmsid, const Direct
 ///////////////////////////////////////////////////////////////////////////////////
 // O(N) action
 // action: S[\phi] = \sum_{x} ( -\kappa/2 \sum_{\nu}( \phi(x).\phi(x+\hat{\nu}) +
-// \phi(x).\phi(x-\hat{\nu}) ) + \phi(x).\phi(x) + \lambda (\phi(x).\phi(x) - 1)^2 )
+// \phi(x).\phi(x-\hat{\nu}) ) + \phi(x).\phi(x) + \lambda (\phi(x).\phi(x) - 1)^2 
+// + s.\phi(x) )
 //
 ///////////////////////////////////////////////////////////////////////////////////
 // heat-bath functions
