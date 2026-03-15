@@ -74,15 +74,16 @@ using plaqw_t = std::array<std::array<Field<T>, NDIM>, NDIM>;
  * But the method is computed in a slightly more optimized way
  *
  * @tparam T
+ * @tparam wT
  * @param U GaugeField to compute staples for
  * @param staples Filed to compute staplesum into at each lattice point
  * @param d1 Direction to compute staplesum for
- * @param plaqw plaquette weights 
+ * @param plaqw plaquette weights
  * @param par Parity to compute staplesum for
  */
-template <typename T>
+template <typename T, typename wT>
 void staplesum(const GaugeField<T> &U, Field<T> &staples, Direction d1,
-               const plaqw_t<hila::arithmetic_type<T>> &plaqw, Parity par = ALL) {
+               const plaqw_t<wT> &plaqw, Parity par = ALL) {
 
     Field<T> lower;
 

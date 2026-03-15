@@ -75,6 +75,8 @@ class Field {
     enum class gather_status_t : unsigned { NOT_DONE, STARTED, DONE };
 
   private:
+    // somewhat arbitrary fingerprint flag for configuration files
+    static constexpr int64_t config_flag = 394824242;
     /**
      * @internal
      * @class field_struct
@@ -1594,6 +1596,9 @@ class Field {
     void read(std::ifstream &inputfile, const CoordinateVector &insize);
     void read(const std::string &filename);
 
+    void config_write(const std::string &filename) const;
+    void config_read(const std::string &filename);
+
     void write_subvolume(std::ofstream &outputfile, const CoordinateVector &cmin,
                          const CoordinateVector &cmax, int precision = 6) const;
     void write_subvolume(const std::string &filenname, const CoordinateVector &cmin,
@@ -1601,6 +1606,16 @@ class Field {
 
     template <typename Out>
     void write_slice(Out &outputfile, const CoordinateVector &slice, int precision = 6) const;
+
+    void subvolume_write(std::ofstream &outputfile, const CoordinateVector &cmin,
+                         const CoordinateVector &cmax, bool binary = true, int precision = 8) const;
+
+    template <typename Out>
+    void slice_write(Out &outputfile, const CoordinateVector &slice, bool binary = true,
+                     int precision = 8) const;
+
+    void config_slice_write(const std::string &filename, const CoordinateVector &slice) const;
+
 
     /**
      * @brief Sum reduction of Field
