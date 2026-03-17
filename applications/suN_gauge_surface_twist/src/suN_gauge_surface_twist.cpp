@@ -570,6 +570,85 @@ void center_interface(GaugeField<group> &U, const plaqw_t<wT> &plaqw, Direction 
     }
 }
 
+template <typename T, typename sT>
+void measure_profile_ft(const Field<Complex<T>> &smS, Direction d, T midpoint,
+                     std::vector<sT> &profile) {
+    ReductionVector<Complex<T>> p(lattice.size(d));
+    p.allreduce(false).delayed(true);
+    sT area = (sT)(lattice.volume() / lattice.size(d) / lattice.size(e_t));
+    onsites (ALL) {
+        if (X.coordinate(e_t) == 0) {
+            p[X.coordinate(d)] += smS[X] / area;
+        }
+    }
+    p.reduce();
+    profile.resize(p.size());
+    for (int i = 0; i < p.size(); ++i) {
+        if (abs(p[i]) > 0) {
+            profile[i] = proj_to_range(arg(p[i]) - midpoint);
+        } else {
+            profile[i] = 0;
+        }
+    }
+}
+
+template <typename group, typename sT, typename wT, typename aT>
+void center_interface_ft(GaugeField<group> &U, const plaqw_t<wT> &plaqw,
+                         const VectorField<sT> &shift, Direction dz, int bds_shift, aT smear_coeff,
+                         int n_smear) {
+
+    static std::vector<Complex<aT>> ft_basis;
+    static bool first = true;
+
+    if (first) {
+        first = false;
+        ft_basis.resize(lattice.size(dz));
+        aT tsign = (aT)1.0;
+        if (bds_shift > 0) {
+            tsign = -tsign;
+        }
+        for (int iz = 0; iz < lattice.size(dz); ++iz) {
+            aT ftarg = M_PI * (aT)iz / (aT)lattice.size(dz);
+            ft_basis[iz] = tsign * phase_to_complex(ftarg);
+        }
+    }
+
+    Field<Complex<double>> smS;
+
+    measure_polyakov_field_complex(U[e_t], smS);
+    smear_spat_field(smS, shift, smear_coeff, n_smear);
+
+    std::vector<aT> line(lattice.size(dz));
+    double surface_level = M_PI * (double)bds_shift / (double)NCOLOR;
+    measure_profile_ft(smS, dz, surface_level, line);
+
+    int startloc = lattice.size(dz) / 2;
+
+    Complex<aT> ftn;
+    if (hila::myrank() == 0) {
+        ftn = 0;
+        for (int z = 0; z < lattice.size(dz); z++) {
+            ftn += 2.0 * line[z] * ft_basis[z];
+        }
+        startloc = (aT)arg(ftn) * (aT)lattice.size(dz) / M_PI + (aT)(lattice.size(dz) + 1) / 2;
+    }
+
+    hila::broadcast(startloc);
+
+    hila::out0 << "CENTERING in " << dz << "-direction, shifting by "
+               << (lattice.size(dz) / 2 - 1 - startloc) << " sites\n";
+
+    while (startloc < lattice.size(dz) / 2 - 1) {
+        translate_config(U, plaqw, dz);
+        ++startloc;
+    }
+    while (startloc >= lattice.size(dz) / 2) {
+        translate_config(U, plaqw, opp_dir(dz));
+        --startloc;
+    }
+}
+
+
 template <typename T, typename slT, typename sT>
 void measure_interface(const Field<Complex<T>> &ismS, Direction dz, slT surface_level, std::vector<sT> &surf,
                        out_only int &size_x, out_only int &size_y) {
@@ -1222,7 +1301,7 @@ int main(int argc, char **argv) {
         update_timer.stop();
 
         if (p.n_ifcentering && (trajectory + 1) % p.n_ifcentering == 0) {
-            center_interface(U, plaqw, bdt_dir, surface_level);
+            center_interface_ft(U, plaqw, shift, bdt_dir, bds_shift, p.smear_coeff, p.n_presmear);
         }
 
         measure_timer.start();
