@@ -146,7 +146,7 @@ void do_trajectory(GaugeField<group> &U, const parameters &p, const plaqw_t<wT> 
 
 template <typename group, typename wT>
 double measure_plaq(const GaugeField<group> &U, const plaqw_t<wT> &plaqw) {
-    Reduction<double> plaq;
+    Reduction<double> plaq = 0;
     plaq.allreduce(false);
 
 
@@ -278,7 +278,7 @@ void measure_polyakov_profile(GaugeField<group> &U, Direction dz) {
     Field<pT> pl;
     measure_polyakov_field_complex(U[e_t], pl);
 
-    ReductionVector<pT> p(lattice.size(dz));
+    ReductionVector<pT> p(lattice.size(dz), 0);
     p.allreduce(false);
     onsites(ALL) if (X.coordinate(e_t) == 0) {
         p[X.coordinate(dz)] += pl[X];
@@ -312,6 +312,7 @@ void measure_stuff(const GaugeField<group> &U, const parameters &p, const plaqw_
     hila::out0 << "MEAS " << std::setprecision(14);
 
     hila::out0 << plaq << ' ' << poly << '\n';
+
 }
 
 

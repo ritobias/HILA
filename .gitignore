@@ -11,6 +11,9 @@ settings.json
 *.o
 *~
 #*#
+*profile_ft_nsm*
+*profile_nsm*
+*poly_dump_*
 .VSCodeCounter/*
 docs/latex/
 docs/html/*
