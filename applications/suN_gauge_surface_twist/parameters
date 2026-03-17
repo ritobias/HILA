@@ -1,7 +1,7 @@
 # This is a parameter file for suN_gauge_surface_twisted
 
 lattice size           32,32,128,6
-beta                   12
+beta                   10.82
 overrelax steps        5
 heatbath steps         5
 trajectories           100000
@@ -10,7 +10,7 @@ random seed            0
 traj/saved             500
 config name            config
 bds direction          2
-bds shift              2
+bds shift              1
 updates/centering      5
 updates/profile meas   10
 updates/surf spec meas 2

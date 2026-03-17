@@ -98,7 +98,7 @@ void staplesum(const GaugeField<T> &U, Field<T> &staples, Direction d1,
         // calculate first lower 'U' of the staple sum
         // do it on opp parity
         onsites(opp_parity(par)) {
-            lower[X] = plaqw[d1][d2][X] * U[d2][X].dagger() * U[d1][X] * U[d2][X + d1];
+            lower[X] = conj(plaqw[d1][d2][X]) * U[d2][X].dagger() * U[d1][X] * U[d2][X + d1];
         }
 
         // calculate then the upper 'n', and add the lower
