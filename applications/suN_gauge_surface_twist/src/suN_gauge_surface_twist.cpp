@@ -387,7 +387,7 @@ void spectraldensity_surface(std::vector<sT> &surf, int size_x, int size_y,
 
         int k = x * x + y * y;
         if (k < pow_size) {
-            npow[k] += buf[i].squarenorm() / (area * area);
+            npow[k] += buf[i].squarenorm() / ((double)area * (double)area);
             hits[k]++;
         }
     }
