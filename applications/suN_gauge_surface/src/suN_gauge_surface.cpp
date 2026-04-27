@@ -41,6 +41,107 @@ struct parameters {
     int n_dump_polyakov;
 };
 
+template <int ni, int nf>
+struct bwrite_to_file_header {
+    std::string fname;
+    std::array<int, ni> ihead;
+    std::array<double, nf> fhead;
+};
+
+template <int ni, int nf, typename T, typename iT, typename atype = hila::arithmetic_type<T>>
+void bwrite_to_file(const bwrite_to_file_header<ni, nf> &header, const std::vector<T> &dat,
+                    iT idump, bool first) {
+
+    if (hila::myrank() == 0) {
+        std::string fname = header.fname;
+        int ibuffsize = header.ihead.size() + NDIM + 7;
+        int fbuffsize = header.fhead.size();
+        int buffsize = dat.size() * sizeof(T);
+        std::ofstream ofile;
+        if (first) {
+            if (filesys_ns::exists(fname)) {
+                std::string fname_temp = fname + "_temp";
+                filesys_ns::rename(fname, fname_temp);
+                std::ifstream ifile;
+                ifile.open(fname_temp, std::ios::in | std::ios::binary);
+                ofile.open(fname, std::ios::out | std::ios::binary);
+
+                int64_t *ibuff = (int64_t *)memalloc(ibuffsize * sizeof(int64_t));
+                ifile.read((char *)ibuff, ibuffsize * sizeof(int64_t));
+                ibuff[0] = header.ihead.size();
+                ibuff[1] = header.fhead.size();
+                ibuff[2] = NDIM;
+                foralldir(d) {
+                    ibuff[3 + (int)d] = lattice.size(d);
+                }
+                ibuff[NDIM + 3] = sizeof(double);
+                ibuff[NDIM + 4] = dat.size();
+                ibuff[NDIM + 5] = sizeof(T);
+                ibuff[NDIM + 6] = sizeof(atype);
+                for (int i = 0; i < header.ihead.size(); ++i) {
+                    ibuff[NDIM + 7 + i] = header.ihead[i];
+                }
+                ofile.write((char *)ibuff, ibuffsize * sizeof(int64_t));
+
+                double *fbuff = (double *)memalloc(fbuffsize * sizeof(double));
+                ifile.read((char *)fbuff, fbuffsize * sizeof(double));
+                ofile.write((char *)fbuff, fbuffsize * sizeof(double));
+
+                atype *buffer = (atype *)memalloc(buffsize);
+
+                while (ifile.good()) {
+                    int64_t tidump;
+                    ifile.read((char *)&(tidump), sizeof(int64_t));
+                    if (ifile.good() && tidump < idump) {
+                        ofile.write((char *)&(tidump), sizeof(int64_t));
+                        ifile.read((char *)buffer, buffsize);
+                        ofile.write((char *)buffer, buffsize);
+                    } else {
+                        break;
+                    }
+                }
+                ifile.close();
+                ofile.close();
+                free(fbuff);
+                free(ibuff);
+                free(buffer);
+                filesys_ns::remove(fname_temp);
+            } else {
+                ofile.open(fname, std::ios::out | std::ios::binary);
+                int64_t *ibuff = (int64_t *)memalloc(ibuffsize * sizeof(int64_t));
+                ibuff[0] = header.ihead.size();
+                ibuff[1] = header.fhead.size();
+                ibuff[2] = NDIM;
+                foralldir(d) {
+                    ibuff[3 + (int)d] = lattice.size(d);
+                }
+                ibuff[NDIM + 3] = sizeof(double);
+                ibuff[NDIM + 4] = dat.size();
+                ibuff[NDIM + 5] = sizeof(T);
+                ibuff[NDIM + 6] = sizeof(atype);
+                for (int i = 0; i < header.ihead.size(); ++i) {
+                    ibuff[NDIM + 7 + i] = header.ihead[i];
+                }
+                ofile.write((char *)ibuff, ibuffsize * sizeof(int64_t));
+
+                ofile.write((char *)header.fhead.data(), fbuffsize * sizeof(double));
+
+
+                ofile.close();
+                free(ibuff);
+            }
+        }
+
+
+        ofile.open(fname, std::ios::out | std::ios_base::app | std::ios::binary);
+        int64_t tidump = (int64_t)idump;
+        ofile.write((char *)&(tidump), sizeof(int64_t));
+        ofile.write((char *)(dat.data()), sizeof(T) * dat.size());
+
+        ofile.close();
+    }
+}
+
 template <typename T>
 void staplesum_db(const GaugeField<T> &U, Field<T> &staples, Direction d1, Parity par,
                   double deltab) {
@@ -285,6 +386,38 @@ void measure_polyakov_profile(GaugeField<group> &U) {
     }
 }
 
+template <typename group, typename pT = Complex<hila::arithmetic_type<group>>>
+std::vector<pT> measure_polyakov_profile(const GaugeField<group> &U, Direction dz) {
+
+    Direction dx, dy;
+    foralldir(td) if (td != dz) {
+        dx = td;
+        break;
+    }
+    foralldir(td) if (td != dz && td != dx) {
+        dy = td;
+        break;
+    }
+
+    int size_x = lattice.size(dx);
+    int size_y = lattice.size(dy);
+
+    int area = size_x * size_y;
+
+    Field<pT> pl;
+    measure_polyakov_field_complex(U[e_t], pl);
+
+    ReductionVector<pT> p(lattice.size(dz), 0);
+    p.delayed(true).allreduce(false);
+    onsites(ALL) if (X.coordinate(e_t) == 0) {
+        p[X.coordinate(dz)] += pl[X] / area;
+    }
+
+    p.reduce();
+
+    return p.vector();
+}
+
 
 template <typename sT, typename aT = hila::arithmetic_type<sT>>
 void measure_profile(const Field<sT> &smS, Direction d, int area, std::vector<sT> &profile) {
@@ -451,117 +584,28 @@ bool measure_interface_spectrum_ft(const Field<sT> &smS, Direction dir_z, int ns
                 }
             }
         }
-
-        std::string prof_file = string_format("profile_ft_nsm%04d", nsm);
-        std::ofstream prof_os;
-
-        if (first_pow) {
-            int64_t npowmeas = 0;
-            for (int ipow = 0; ipow < pow_size; ++ipow) {
-                if (hits[ipow] > 0) {
-                    ++npowmeas;
-                }
-            }
-
-            if (filesys_ns::exists(prof_file)) {
-                std::string prof_file_temp = prof_file + "_temp";
-                filesys_ns::rename(prof_file, prof_file_temp);
-                std::ifstream ifile;
-                ifile.open(prof_file_temp, std::ios::in | std::ios::binary);
-                prof_os.open(prof_file, std::ios::out | std::ios::binary);
-
-                int64_t *ibuff = (int64_t *)memalloc((NDIM + 5) * sizeof(int64_t));
-                ifile.read((char *)ibuff, (NDIM + 5) * sizeof(int64_t));
-                prof_os.write((char *)ibuff, (NDIM + 5) * sizeof(int64_t));
-                int64_t tnpowmeas = ibuff[NDIM + 2];
-                double *buffer = nullptr;
-                if (tnpowmeas > npowmeas) {
-                    buffer = (double *)memalloc(tnpowmeas * sizeof(double));
-                } else {
-                    buffer = (double *)memalloc(npowmeas * sizeof(double));
-                    for (int tib = tnpowmeas; tib < npowmeas; ++tib) {
-                        buffer[tib] = 0;
-                    }
-                }
-                ifile.read((char *)buffer, 2 * sizeof(double));
-                prof_os.write((char *)buffer, 2 * sizeof(double));
-
-                ifile.read((char *)buffer, tnpowmeas * sizeof(double));
-
-                npowmeas = 0;
-                for (int ipow = 0; ipow < pow_size; ++ipow) {
-                    if (hits[ipow] > 0) {
-                        buffer[npowmeas] = (double)ipow;
-                        ++npowmeas;
-                    }
-                }
-                prof_os.write((char *)buffer, npowmeas * sizeof(double));
-
-                while (ifile.good()) {
-                    ifile.read((char *)ibuff, sizeof(int64_t));
-                    int64_t tidump = ibuff[0];
-                    ifile.read((char *)buffer, tnpowmeas * sizeof(double));
-                    if (ifile.good() && tidump < idump) {
-                        prof_os.write((char *)&(tidump), sizeof(int64_t));
-                        prof_os.write((char *)buffer, npowmeas * sizeof(double));
-                    } else {
-                        break;
-                    }
-                }
-                ifile.close();
-                prof_os.close();
-                free(buffer);
-                free(ibuff);
-                filesys_ns::remove(prof_file_temp);
-            } else {
-                prof_os.open(prof_file, std::ios::out | std::ios::binary);
-                int64_t *ibuff = (int64_t *)memalloc((NDIM + 5) * sizeof(int64_t));
-                ibuff[0] = NCOLOR;
-                ibuff[1] = NDIM;
-                foralldir(d) {
-                    ibuff[2 + (int)d] = lattice.size(d);
-                }
-                ibuff[NDIM + 2] = npowmeas;
-                ibuff[NDIM + 3] = nsm;
-                ibuff[NDIM + 4] = sizeof(double);
-                prof_os.write((char *)ibuff, (NDIM + 5) * sizeof(int64_t));
-                double tval = p.beta;
-                prof_os.write((char *)&(tval), sizeof(double));
-                tval = p.smear_coeff;
-                prof_os.write((char *)&(tval), sizeof(double));
-
-                double *buffer = (double *)memalloc(npowmeas * sizeof(double));
-                for (int tib = npowmeas; tib < npowmeas; ++tib) {
-                    buffer[tib] = 0;
-                }
-                npowmeas = 0;
-                for (int ipow = 0; ipow < pow_size; ++ipow) {
-                    if (hits[ipow] > 0) {
-                        buffer[npowmeas] = (double)ipow;
-                        ++npowmeas;
-                    }
-                }
-                prof_os.write((char *)buffer, npowmeas * sizeof(double));
-
-                prof_os.close();
-                free(buffer);
-                free(ibuff);
+        
+        bwrite_to_file_header<3, 2 + pow_size> psh;
+        psh.ihead[0] = NCOLOR;
+        psh.ihead[1] = nsm;
+        psh.ihead[2] = pow_size;
+        psh.fhead[0] = p.beta;
+        psh.fhead[1] = p.smear_coeff;
+        int64_t npowmeas = 0;
+        std::vector<double> powspec(pow_size);
+        for (int ipow = 0; ipow < pow_size; ++ipow) {
+            if (hits[ipow] > 0) {
+                psh.fhead[2 + npowmeas] = ipow;
+                powspec[npowmeas] = npow[ipow] / hits[ipow];
+                ++npowmeas;
             }
         }
+        powspec.resize(npowmeas);
+        psh.fname = string_format("profile_ft_nsm%04d", nsm);
+        bwrite_to_file(psh, powspec, idump, first_pow);
 
-        if (ok) {
-            prof_os.open(prof_file, std::ios::out | std::ios_base::app | std::ios::binary);
-
-            prof_os.write((char *)&(idump), sizeof(int64_t));
-            for (int ipow = 0; ipow < pow_size; ++ipow) {
-                if (hits[ipow] > 0) {
-                    double tval = npow[ipow] / hits[ipow];
-                    prof_os.write((char *)&(tval), sizeof(double));
-                }
-            }
-            prof_os.close();
-        }
     }
+
     return true;
 }
 
@@ -751,115 +795,24 @@ bool measure_interface_spectrum(const Field<sT> &smS, Direction dir_z, aT surfac
             }
         }
 
-        std::string prof_file = string_format("profile_nsm%04d", nsm);
-        std::ofstream prof_os;
-
-        if (first_pow) {
-            int64_t npowmeas = 0;
-            for (int ipow = 0; ipow < pow_size; ++ipow) {
-                if (hits[ipow] > 0) {
-                    ++npowmeas;
-                }
-            }
-
-            if (filesys_ns::exists(prof_file)) {
-                std::string prof_file_temp = prof_file + "_temp";
-                filesys_ns::rename(prof_file, prof_file_temp);
-                std::ifstream ifile;
-                ifile.open(prof_file_temp, std::ios::in | std::ios::binary);
-                prof_os.open(prof_file, std::ios::out | std::ios::binary);
-
-                int64_t *ibuff = (int64_t *)memalloc((NDIM + 5) * sizeof(int64_t));
-                ifile.read((char *)ibuff, (NDIM + 5) * sizeof(int64_t));
-                prof_os.write((char *)ibuff, (NDIM + 5) * sizeof(int64_t));
-                int64_t tnpowmeas = ibuff[NDIM + 2];
-                double *buffer = nullptr;
-                if (tnpowmeas > npowmeas) {
-                    buffer = (double *)memalloc(tnpowmeas * sizeof(double));
-                } else {
-                    buffer = (double *)memalloc(npowmeas * sizeof(double));
-                    for (int tib = tnpowmeas; tib < npowmeas; ++tib) {
-                        buffer[tib] = 0;
-                    }
-                }
-                ifile.read((char *)buffer, 2 * sizeof(double));
-                prof_os.write((char *)buffer, 2 * sizeof(double));
-
-                ifile.read((char *)buffer, tnpowmeas * sizeof(double));
-
-                npowmeas = 0;
-                for (int ipow = 0; ipow < pow_size; ++ipow) {
-                    if (hits[ipow] > 0) {
-                        buffer[npowmeas] = (double)ipow;
-                        ++npowmeas;
-                    }
-                }
-                prof_os.write((char *)buffer, npowmeas * sizeof(double));
-
-                while (ifile.good()) {
-                    ifile.read((char *)ibuff, sizeof(int64_t));
-                    int64_t tidump = ibuff[0];
-                    ifile.read((char *)buffer, tnpowmeas * sizeof(double));
-                    if (ifile.good() && tidump < idump) {
-                        prof_os.write((char *)&(tidump), sizeof(int64_t));
-                        prof_os.write((char *)buffer, npowmeas * sizeof(double));
-                    } else {
-                        break;
-                    }
-                }
-                ifile.close();
-                prof_os.close();
-                free(buffer);
-                free(ibuff);
-                filesys_ns::remove(prof_file_temp);
-            } else {
-                prof_os.open(prof_file, std::ios::out | std::ios::binary);
-                int64_t *ibuff = (int64_t *)memalloc((NDIM + 5) * sizeof(int64_t));
-                ibuff[0] = NCOLOR;
-                ibuff[1] = NDIM;
-                foralldir(d) {
-                    ibuff[2 + (int)d] = lattice.size(d);
-                }
-                ibuff[NDIM + 2] = npowmeas;
-                ibuff[NDIM + 3] = nsm;
-                ibuff[NDIM + 4] = sizeof(double);
-                prof_os.write((char *)ibuff, (NDIM + 5) * sizeof(int64_t));
-                double tval = p.beta;
-                prof_os.write((char *)&(tval), sizeof(double));
-                tval = p.smear_coeff;
-                prof_os.write((char *)&(tval), sizeof(double));
-
-                double *buffer = (double *)memalloc(npowmeas * sizeof(double));
-                for (int tib = npowmeas; tib < npowmeas; ++tib) {
-                    buffer[tib] = 0;
-                }
-                npowmeas = 0;
-                for (int ipow = 0; ipow < pow_size; ++ipow) {
-                    if (hits[ipow] > 0) {
-                        buffer[npowmeas] = (double)ipow;
-                        ++npowmeas;
-                    }
-                }
-                prof_os.write((char *)buffer, npowmeas * sizeof(double));
-
-                prof_os.close();
-                free(buffer);
-                free(ibuff);
+        bwrite_to_file_header<3, 2 + pow_size> psh;
+        psh.ihead[0] = NCOLOR;
+        psh.ihead[1] = nsm;
+        psh.ihead[2] = pow_size;
+        psh.fhead[0] = p.beta;
+        psh.fhead[1] = p.smear_coeff;
+        int64_t npowmeas = 0;
+        std::vector<double> powspec(pow_size);
+        for (int ipow = 0; ipow < pow_size; ++ipow) {
+            if (hits[ipow] > 0) {
+                psh.fhead[2 + npowmeas] = ipow;
+                powspec[npowmeas] = npow[ipow] / hits[ipow];
+                ++npowmeas;
             }
         }
-
-        if(ok) {
-            prof_os.open(prof_file, std::ios::out | std::ios_base::app | std::ios::binary);
-
-            prof_os.write((char *)&(idump), sizeof(int64_t));
-            for (int ipow = 0; ipow < pow_size; ++ipow) {
-                if (hits[ipow] > 0) {
-                    double tval = npow[ipow] / hits[ipow];
-                    prof_os.write((char *)&(tval), sizeof(double));
-                }
-            }
-            prof_os.close();
-        }
+        powspec.resize(npowmeas);
+        psh.fname = string_format("profile_nsm%04d", nsm);
+        bwrite_to_file(psh, powspec, idump, first_pow);
     }
     return true;
 }
@@ -1183,6 +1136,7 @@ int main(int argc, char **argv) {
     double p_now = measure_polyakov(U).real();
 
     bool first_pow = true;
+    bool first_prof = true;
     bool run = true;
     for (int trajectory = start_traj; run && trajectory < p.n_trajectories; trajectory++) {
 
@@ -1264,9 +1218,21 @@ int main(int argc, char **argv) {
             }
         }
 
-        if (p.n_profile && (trajectory + 1) % p.n_profile == 0) {
-            measure_polyakov_profile(U);
+        //if (p.n_profile && (trajectory + 1) % p.n_profile == 0) {
+            //measure_polyakov_profile(U);
             //measure_plaq_profile(U);
+        //}
+        if (p.n_profile && (trajectory + 1) % p.n_profile == 0) {
+            int icdump = (trajectory + 1) / p.n_profile;
+            bwrite_to_file_header<2, 2> polyprofh;
+            polyprofh.ihead[0] = NCOLOR;
+            polyprofh.ihead[1] = 0;
+            polyprofh.fhead[0] = p.beta;
+            polyprofh.fhead[1] = p.smear_coeff;
+            polyprofh.fname = "poly_prof";
+            auto profile = measure_polyakov_profile(U, e_z);
+            bwrite_to_file(polyprofh, profile, icdump, first_prof);
+            first_prof = false;
         }
 
         hila::out0 << "Measure_end " << trajectory << " time " << hila::gettime() << std::endl;

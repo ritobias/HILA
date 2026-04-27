@@ -44,7 +44,6 @@ void bwrite_to_file(std::string fname, const std::vector<T> &dat, parameters &p,
         std::ofstream ofile;
 
         if (first) {
-            first = false;
             if (filesys_ns::exists(fname)) {
                 // if file exists: make sure 
                 std::string fname_temp = fname + "_temp";

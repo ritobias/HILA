@@ -40,6 +40,98 @@ struct parameters {
 };
 
 ////////////////////////////////////////////////////////////////
+template <int ni, int nf>
+struct bwrite_to_file_header {
+    std::string fname;
+    std::array<int, ni> ihead;
+    std::array<double, nf> fhead;
+};
+
+template <int ni, int nf, typename T, typename iT, typename atype = hila::arithmetic_type<T>>
+void bwrite_to_file(const bwrite_to_file_header<ni, nf> &header, const std::vector<T> &dat,
+                    iT idump, bool first) {
+
+    if (hila::myrank() == 0) {
+        std::string fname = header.fname;
+        int ibuffsize = header.ihead.size() + NDIM + 6;
+        int fbuffsize = header.fhead.size();
+        int buffsize = dat.size() * sizeof(T);
+        std::ofstream ofile;
+        if (first) {
+            if (filesys_ns::exists(fname)) {
+                // if file exists: make sure
+                std::string fname_temp = fname + "_temp";
+                filesys_ns::rename(fname, fname_temp);
+                std::ifstream ifile;
+                ifile.open(fname_temp, std::ios::in | std::ios::binary);
+                ofile.open(fname, std::ios::out | std::ios::binary);
+                
+                int64_t *ibuff = (int64_t *)memalloc(ibuffsize * sizeof(int64_t));
+                ifile.read((char *)ibuff, ibuffsize * sizeof(int64_t));
+                ofile.write((char *)ibuff, ibuffsize * sizeof(int64_t));
+                
+                double *fbuff = (double *)memalloc(fbuffsize * sizeof(double));
+                ifile.read((char *)fbuff, fbuffsize * sizeof(double));
+                ofile.write((char *)fbuff, fbuffsize * sizeof(double));
+
+                atype *buffer = (atype *)memalloc(buffsize);
+
+                while (ifile.good()) {
+                    ifile.read((char *)ibuff, sizeof(int64_t));
+                    int64_t tidump = ibuff[0];
+                    if (ifile.good() && tidump < idump) {
+                        ofile.write((char *)&(tidump), sizeof(int64_t));
+                        ifile.read((char *)buffer, buffsize);
+                        ofile.write((char *)buffer, buffsize);
+                    } else {
+                        break;
+                    }
+                }
+                ifile.close();
+                ofile.close();
+                free(fbuff);
+                free(ibuff);
+                free(buffer);
+                filesys_ns::remove(fname_temp);
+            } else {
+                ofile.open(fname, std::ios::out | std::ios::binary);
+                int64_t *ibuff = (int64_t *)memalloc(ibuffsize * sizeof(int64_t));
+                ibuff[0] = NCOLOR;
+                ibuff[1] = NDIM;
+                foralldir(d) {
+                    ibuff[2 + (int)d] = lattice.size(d);
+                }
+                ibuff[NDIM + 2] = sizeof(double);
+                ibuff[NDIM + 3] = dat.size();
+                ibuff[NDIM + 4] = sizeof(T);
+                ibuff[NDIM + 5] = sizeof(atype);
+                for (int i = 0; i < header.ihead.size(); ++i) {
+                    ibuff[NDIM + 6 + i] = header.ihead[i];
+                }
+                ofile.write((char *)ibuff, ibuffsize * sizeof(int64_t));
+
+                ofile.write((char *)head.fhead.data(), fbuffsize * sizeof(double));
+
+
+                ofile.close();
+                free(fbuff);
+                free(ibuff);
+            }
+        }
+
+
+        ofile.open(fname, std::ios::out | std::ios_base::app | std::ios::binary);
+        int64_t tidump = (int64_t)idump;
+        ofile.write((char *)&(tidump), sizeof(int64_t));
+
+        for (int ic = 0; ic < dat.size(); ++ic) {
+            ofile.write((char *)&(dat[ic]), sizeof(T));
+        }
+
+        ofile.close();
+    }
+}
+
 
 /**
  * @brief Wrapper function to updated GaugeField per direction
