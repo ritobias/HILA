@@ -10,7 +10,7 @@ thermalization         20
 random seed            0
 traj/saved             500
 config name            config
-polyakov potential     range 0.18,0.22
+polyakov potential     autorange 0.1 50 200
 updates/profile meas   100
 updates/surf spec meas 2
 smearing steps         20,40,50,60,70,80
@@ -18,3 +18,4 @@ smear coefficient      0.9
 z smearing steps       10,10,10,10,10,10
 traj/surface           0
 traj/polyakov dump     0
+

@@ -16,7 +16,7 @@
 using ftype = float;
 using mygroup = SU<NCOLOR, ftype>;
 
-enum class poly_limit { OFF, RANGE, PARABOLIC };
+enum class poly_limit { OFF, RANGE, AUTORANGE, PARABOLIC };
 
 // define a struct to hold the input parameters: this
 // makes it simpler to pass the values around
@@ -33,7 +33,9 @@ struct parameters {
     std::string config_file;
     double time_offset;
     poly_limit polyakov_pot;
-    double poly_min, poly_max, poly_m2;
+    double poly_min, poly_max, poly_m2, poly_rel_tol;
+    int n_tune_poly_range;
+    int n_tune_poly_range_max;
     std::vector<int> n_smear;
     double smear_coeff;
     std::vector<int> z_smear;
@@ -612,7 +614,8 @@ bool measure_interface_spectrum_ft(const Field<sT> &smS, Direction dir_z, int ns
 
 template <typename sT, typename pT, typename aT>
 bool measure_interface(const Field<sT> &smS, Direction dz, pT surface_level, std::vector<aT> &surf1,
-                       std::vector<aT> &surf2, out_only int &size_x, out_only int &size_y) {
+                       std::vector<aT> &surf2, out_only int &size_x, out_only int &size_y,
+                       out_only sT &avp12, out_only sT &avp21, out_only sT &zdsloc) {
 
     Direction dx, dy;
     foralldir(td) if (td != dz) {
@@ -639,6 +642,7 @@ bool measure_interface(const Field<sT> &smS, Direction dz, pT surface_level, std
 
     int startloc1 = lattice.size(dz) / 2;
     int startloc2 = startloc1 + 1;
+    sT zsloc1 = 0, zsloc2 = 0;
 
     if (hila::myrank() == 0) {
         while (line[z_ind(startloc1, dz)] > surface_level && startloc1 > -0.5 * lattice.size(dz))
@@ -646,45 +650,59 @@ bool measure_interface(const Field<sT> &smS, Direction dz, pT surface_level, std
         while (line[z_ind(startloc1 + 1, dz)] <= surface_level && startloc1 < 1.5 * lattice.size(dz))
             startloc1++;
         startloc1 = z_ind(startloc1, dz);
+        zsloc1 = startloc1 + (surface_level - line[startloc1]) /
+                                 (line[z_ind(startloc1 + 1, dz)] - line[startloc1]);
 
         startloc2 = startloc1 + 1;
         while (line[z_ind(startloc2 + 1, dz)] > surface_level &&
             startloc2 < startloc1 + lattice.size(dz))
             startloc2++;
         startloc2 = z_ind(startloc2, dz);
+        zsloc2 = startloc2 + (surface_level - line[startloc2]) /
+                                 (line[z_ind(startloc2 + 1, dz)] - line[startloc2]);
     }
     
     hila::broadcast(startloc1);
     hila::broadcast(startloc2);
+    hila::broadcast(zsloc1);
+    hila::broadcast(zsloc2);
 
     int dsloc = startloc2 - startloc1;
-    if(startloc2 <= startloc1) {
+    zdsloc = zsloc2 - zsloc1;
+    if (startloc2 <= startloc1) {
         dsloc += lattice.size(dz);
-    }
-    int sloff1 = dsloc / 5;
-    sT avp12 = 0;
-    int navp12 = 0;
-    for (int i = startloc1 + sloff1; i < startloc1 + dsloc - sloff1; ++i) {
-        avp12 += line[z_ind(i, dz)];
-        ++navp12;
-    }
-    if(navp12 > 0) {
-        avp12 /= navp12;
-    }
-    int dslocc = lattice.size(dz) - dsloc;
-    int sloff2 = dslocc / 5;
-    sT avp21 = 0;
-    int navp21 = 0;
-    for (int i = startloc2 + sloff2; i < startloc2 + dslocc - sloff2; ++i) {
-        avp21 += line[z_ind(i, dz)];
-        ++navp21;
-    }
-    if (navp21 > 0) {
-        avp21 /= navp21;
+        zdsloc += lattice.size(dz);
     }
 
-    hila::out0 << string_format("sloc1=% 4d, sloc2=% 4d, dsloc=% 4d, avPc=% 0.4f, avPdc=% 0.4f\n",
-                                startloc1, startloc2, dsloc, avp21, avp12);
+    if(hila::myrank() == 0) {
+        int sloff1 = dsloc / 5;
+        avp12 = 0;
+        int navp12 = 0;
+        for (int i = startloc1 + sloff1; i < startloc1 + dsloc - sloff1; ++i) {
+            avp12 += line[z_ind(i, dz)];
+            ++navp12;
+        }
+        if(navp12 > 0) {
+            avp12 /= navp12;
+        }
+        int dslocc = lattice.size(dz) - dsloc;
+        int sloff2 = dslocc / 5;
+        avp21 = 0;
+        int navp21 = 0;
+        for (int i = startloc2 + sloff2; i < startloc2 + dslocc - sloff2; ++i) {
+            avp21 += line[z_ind(i, dz)];
+            ++navp21;
+        }
+        if (navp21 > 0) {
+            avp21 /= navp21;
+        }
+    }
+
+    hila::broadcast(avp12);
+    hila::broadcast(avp21);
+
+    hila::out0 << string_format("sloc1=% 6.2f, sloc2=% 6.2f, dsloc=% 6.2f, avPc=% 0.4f, avPdc=% 0.4f\n",
+                                zsloc1, zsloc2, zdsloc, avp21, avp12);
 
     if(abs(dsloc) > lattice.size(dz) / 5) {
         std::vector<sT> lsmS;
@@ -751,12 +769,13 @@ bool measure_interface(const Field<sT> &smS, Direction dz, pT surface_level, std
 
 
 template <typename sT, typename aT>
-bool measure_interface_spectrum(const Field<sT> &smS, Direction dir_z, aT surface_level, int nsm, int64_t idump,
-                                parameters &p, bool first_pow) {
+bool measure_interface_spectrum(const Field<sT> &smS, Direction dir_z, aT surface_level, int nsm,
+                                int64_t idump, parameters &p, out_only sT &avp12,
+                                out_only sT &avp21, out_only sT &dsloc, bool first_pow) {
     std::vector<sT> surf1, surf2;
     int size_x, size_y;
     hila::out0 << "SMEAR" << nsm << " ";
-    bool ok = measure_interface(smS, dir_z, surface_level, surf1, surf2, size_x, size_y);
+    bool ok = measure_interface(smS, dir_z, surface_level, surf1, surf2, size_x, size_y, avp12, avp21, dsloc);
 
     if (hila::myrank() == 0) {
         if (false) {
@@ -1065,19 +1084,24 @@ int main(int argc, char **argv) {
     p.config_file = par.get("config name");
 
     // if polyakov range is off, do nothing with
-    int p_item = par.get_item("polyakov potential", {"off", "min", "range"});
+    int p_item = par.get_item("polyakov potential", {"off", "min", "range", "autorange"});
     if (p_item == 0) {
         p.polyakov_pot = poly_limit::OFF;
     } else if (p_item == 1) {
         p.polyakov_pot = poly_limit::PARABOLIC;
         p.poly_min = par.get();
         p.poly_m2 = par.get("mass2");
-    } else {
+    } else if (p_item == 2) {
         p.polyakov_pot = poly_limit::RANGE;
         Vector<2, double> r;
         r = par.get();
         p.poly_min = r[0];
         p.poly_max = r[1];
+    } else {
+        p.polyakov_pot = poly_limit::AUTORANGE;
+        p.poly_rel_tol = par.get();
+        p.n_tune_poly_range = par.get();
+        p.n_tune_poly_range_max = par.get();
     }
 
     if (par.get_item("updates/profile meas", {"off", "%i"}) == 1) {
@@ -1104,7 +1128,6 @@ int main(int argc, char **argv) {
                           "smearing steps'\n";
             hila::terminate(0);
         }
-
     } else {
         p.n_dump_polyakov = 0;
     }
@@ -1134,6 +1157,32 @@ int main(int argc, char **argv) {
 
     double p_prev = (double)NCOLOR;
     double p_now = measure_polyakov(U).real();
+
+    double avp12 = 0, avp21 = 0;
+    double dsloc = 0;
+
+    double gavp12u = 2.0 * p_now;
+    double gavp12l = 0;
+    double gdsloc = lattice.size(e_z) / 2;
+    std::vector<double> plaql, dslocl, avp12ul, avp12ll;
+    if (p.n_tune_poly_range > 0) {
+        hila::input prl_stat;
+        if (prl_stat.open("poly_range_limits", false, false)) {
+            // reading existing poly range limits:
+            hila::out0 << "READING POLYAKOV RANGE LIMITS:\n";
+            gavp12l = prl_stat.get("gavp12l");
+            gavp12u = prl_stat.get("gavp12u");
+            gdsloc = prl_stat.get("gdsloc");
+            prl_stat.close();
+            p.poly_min = (1.0 - p.poly_rel_tol) * 0.5 * gavp12l;
+            p.poly_max = (1.0 + p.poly_rel_tol) * 0.5 * gavp12u;
+            hila::out0 << "poly min: " << p.poly_min << " , poly max: " << p.poly_max << "\n";
+        }
+
+        avp12ul.resize(p.n_tune_poly_range, gavp12u);
+        avp12ll.resize(p.n_tune_poly_range, gavp12l);
+        dslocl.resize(p.n_tune_poly_range, gdsloc);
+    }
 
     bool first_pow = true;
     bool first_prof = true;
@@ -1176,7 +1225,7 @@ int main(int argc, char **argv) {
                 measure_polyakov_field(U[e_t], smS);
 
                 ftype surface_level = p_now;
-                if (p.polyakov_pot == poly_limit::RANGE) {
+                if (p.polyakov_pot == poly_limit::RANGE || p.polyakov_pot == poly_limit::AUTORANGE) {
                     surface_level = 0.5 * (p.poly_min + p.poly_max);
                 }
                 hila::out0 << string_format("SURFLEV %0.5f\n", surface_level);
@@ -1202,11 +1251,34 @@ int main(int argc, char **argv) {
                         }
                     }
                     if(n_smear > 0) {
-                        measure_interface_spectrum(tsmS, e_z, surface_level, n_smear, idump, p, first_pow);
+                        measure_interface_spectrum(tsmS, e_z, surface_level, n_smear, idump, p,
+                                                   avp12, avp21, dsloc, first_pow);
                     }
                     measure_interface_spectrum_ft(smS, e_z, n_smear, idump, p, first_pow);
                 }
                 first_pow = false;
+
+                if(p.n_tune_poly_range > 0) {
+                    int64_t tidump = idump % p.n_tune_poly_range;
+
+                    if(idump < p.n_tune_poly_range_max) {
+                        gavp12u += (avp12 - avp12ul[tidump]) / p.n_tune_poly_range;
+                        avp12ul[tidump] = avp12;
+                        gavp12l += (avp12 - avp12ll[tidump]) / p.n_tune_poly_range;
+                        avp12ll[tidump] = avp12;
+
+                        p.poly_min = (1.0 - p.poly_rel_tol) * 0.5 * gavp12l;
+                        p.poly_max = (1.0 + p.poly_rel_tol) * 0.5 * gavp12u;
+                    }
+
+                    gdsloc += (dsloc - dslocl[tidump]) / p.n_tune_poly_range;
+                    dslocl[tidump] = dsloc;
+
+                    hila::out0 << string_format(
+                        "gavp12=% 0.4f, dsloc=% 6.2f, poly_min=% 0.4f, poly_max=% 0.4f\n", 0.5 * (gavp12u + gavp12l),
+                        gdsloc, p.poly_min, p.poly_max);
+
+                }
             }
 
             if (p.n_dump_polyakov && (trajectory + 1) % p.n_dump_polyakov == 0) {
@@ -1243,6 +1315,18 @@ int main(int argc, char **argv) {
         run = !hila::time_to_finish();
         if (!run || (p.n_save > 0 && (trajectory + 1) % p.n_save == 0)) {
             checkpoint(U, p.config_file, p.n_trajectories, trajectory);
+            if(p.n_tune_poly_range > 0) {
+                if (hila::myrank() == 0) {
+
+                    // write the poly range limits:
+                    std::ofstream outf;
+                    outf.open("poly_range_limits", std::ios::out | std::ios::trunc);
+                    outf << "gavp12l " << gavp12l << '\n';
+                    outf << "gavp12u " << gavp12u << '\n';
+                    outf << "gdsloc " << gdsloc << '\n';
+                    outf.close();
+                }
+            }
         }
     }
 

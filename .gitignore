@@ -28,3 +28,4 @@ applications/*/test*/*
 *profile_*
 *fdump_*
 *dump*
+*poly_prof*
