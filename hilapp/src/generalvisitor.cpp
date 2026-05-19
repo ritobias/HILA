@@ -346,10 +346,9 @@ bool GeneralVisitor::isStmtWithSemicolon(Stmt *S) {
 /////////////////////////////////////////////////////////////////
 
 Parity GeneralVisitor::get_parity_val(const Expr *pExpr) {
-    SourceLocation SL;
     APValue APV;
 
-    if (pExpr->isCXX11ConstantExpr(*Context, &APV, &SL)) {
+    if (pExpr->isCXX11ConstantExpr(HILAPP_ARGS_isCXX11ConstantExpr(*Context, &APV, nullptr))) {
         // Parity is now constant
         int64_t val = (APV.getInt().getExtValue());
         Parity p;
@@ -813,7 +812,13 @@ std::string GeneralVisitor::generate_constant_var_name(DeclRefExpr *DRE) {
     std::string nspace;
 
     if (DRE->hasQualifier()) {
+
+#if (LLVM_VERSION_MAJOR > 22) || (LLVM_VERSION_MAJOR == 22 && LLVM_VERSION_MINOR >= 1)
+        auto *NSP = DRE->getQualifier().getAsNamespaceAndPrefix().Namespace->getNamespace();
+#else
         auto *NSP = DRE->getQualifier()->getAsNamespace();
+#endif
+
         if (NSP) {
             NSP = NSP->getCanonicalDecl();
 

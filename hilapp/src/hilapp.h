@@ -16,6 +16,7 @@
 #include "clang/Rewrite/Core/Rewriter.h"
 
 #include "srcbuf.h"
+#include "llvm_hilapp_compat.h"
 
 // set namespaces globally
 using namespace clang;

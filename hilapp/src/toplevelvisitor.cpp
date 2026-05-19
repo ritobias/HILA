@@ -870,7 +870,7 @@ bool TopLevelVisitor::is_select_stmt(Stmt *s, Expr **value_expr) {
 bool TopLevelVisitor::handle_constant_ref(Expr *E) {
 
     APValue val;
-    if (!E->isCXX11ConstantExpr(*Context, &val, nullptr))
+    if (!E->isCXX11ConstantExpr(HILAPP_ARGS_isCXX11ConstantExpr(*Context, &val, nullptr)))
         return false; // nothing
 
     // no need to do anything if not kernelized
