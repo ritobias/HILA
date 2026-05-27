@@ -1446,19 +1446,10 @@ bool TopLevelVisitor::handle_constexpr_if(Stmt *s) {
     }
 
     if (st != nullptr) {
-        SourceRange r = st->getSourceRange();
-        int beginloc = writeBuf->get_index(r.getBegin());
-        int endloc;
-        if (writeBuf->get_original(beginloc) == '{') {
-            endloc = writeBuf->get_index(r.getEnd());
-        } else {
-            // Find the range of the stmt including the trailing ;
-            endloc = writeBuf->find_original(r.getEnd(), ';');
-        }
+        SourceRange r =  getRangeWithSemicolon(st->getSourceRange(),false);
+        writeBuf->insert(r.getBegin(), "{}\n#if 0  // hilapp commented out\n", true, false);
+        writeBuf->insert_after(getSourceLocationAtEndOfRange(r), "\n#endif // end commented out\n", true, false);
 
-        // writeBuf->comment_range(beginloc, endloc);
-        writeBuf->insert(beginloc, "{}\n#if 0  // hilapp commented out\n", true, false);
-        writeBuf->insert(endloc + 1, "\n#endif // end commented out\n", true, false);
     }
 
     // if (ifstmt->getInit())
