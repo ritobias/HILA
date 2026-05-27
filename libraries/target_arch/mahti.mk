@@ -19,7 +19,7 @@ LD := mpic++
 
 # Define compilation flags
 CXXFLAGS  := -O3 -x c++ --std=c++17 -fno-rtti -mavx2 -mfma -march=native
-CXXFLAGS_NOOPT := -X c++ --std=c++17 -fno-rtti
+CXXFLAGS_NOOPT := -x c++ --std=c++17 -fno-rtti
 #CXXFLAGS := -g -x c++ --std=c++17
 
 # hilapp needs to know where c++ system include files are located.  This is not a problem if
@@ -28,13 +28,13 @@ CXXFLAGS_NOOPT := -X c++ --std=c++17 -fno-rtti
 # system installed compilers.  g++ should be present almost everywhere.  The strange incantation
 # below makes g++ list the search directories.  The result is written to build/0hilapp_incl_dirs
 
-HILAPP_INCLUDE_LIST := $(addprefix -I, $(shell echo | $(CC) -xc++ --std=c++17 -Wp,-v - 2>&1 | grep "^ "))
+# HILAPP_INCLUDE_LIST := $(addprefix -I, $(shell echo | $(CC) -xc++ --std=c++17 -Wp,-v - 2>&1 | grep "^ "))
 
 
 # Write hilapp inlcudes to a file 0hilapp_incl_dirs
 $(shell mkdir -p build)
 $(shell echo "$(HILAPP_INCLUDE_LIST)" > build/0hilapp_incl_dirs )
-HILAPP_INCLUDES := `cat build/0hilapp_incl_dirs`
+# HILAPP_INCLUDES := `cat build/0hilapp_incl_dirs`
 
 
 # Linker libraries and possible options
