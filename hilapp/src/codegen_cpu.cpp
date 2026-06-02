@@ -173,7 +173,7 @@ std::string TopLevelVisitor::generate_code_cpu(Stmt *S, bool semicolon_at_end, s
                     code << "const " << l.element_type << " " << d.name_with_dir << " = "
                          << l.new_name;
 
-                    if (target.vectorize && l.vecinfo.is_vectorizable) {
+                    if (target.vectorize /* && l.vecinfo.is_vectorizable */) {
                         // now l is vectorizable, but accessed sequentially -- this inly
                         // happens in vectorized targets
                         code << ".get_value_at_nb_site(" << dirname << ", " << looping_var
@@ -202,7 +202,7 @@ std::string TopLevelVisitor::generate_code_cpu(Stmt *S, bool semicolon_at_end, s
                             loopBuf.get(d.parityExpr->getSourceRange())); // mapped name was
 
                     for (field_ref *ref : d.ref_list) {
-                        if (target.vectorize && l.vecinfo.is_vectorizable) {
+                        if (target.vectorize /* && l.vecinfo.is_vectorizable */) {
                             loopBuf.replace(ref->fullExpr, l.new_name + ".get_value_at_nb_site(" +
                                                                dirname + ", " + looping_var + ")");
                         } else {

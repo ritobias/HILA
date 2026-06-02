@@ -125,7 +125,6 @@ class loopFunctionVisitor : public GeneralVisitor, public RecursiveASTVisitor<lo
 
         // flag assignments from Stmt
         if (is_assignment_expr(s, &assignment_op, is_compound_assign)) {
-            // This checks the "element<> -style assigns which we do not want now!
             assign_stmt = s;
             is_assignment = true;
             // next visit to declrefexpr will be to the assigned to variable
