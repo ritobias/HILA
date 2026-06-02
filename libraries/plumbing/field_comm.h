@@ -47,7 +47,9 @@ void Field<T>::field_struct::gather_comm_elements(
             if (!antiperiodic) {
                 payload.gather_elements(buffer, index_list, n, lattice);
             } else {
+#ifdef SPECIAL_BOUNDARY_CONDITIONS
                 payload.gather_elements_negated(buffer, index_list, n, lattice);
+#endif
             }
         } else {
             // without it, can do the full block
@@ -60,7 +62,9 @@ void Field<T>::field_struct::gather_comm_elements(
         if (!antiperiodic)
             payload.gather_elements(buffer, index_list, n, lattice);
         else {
+#ifdef SPECIAL_BOUNDARY_CONDITIONS
             payload.gather_elements_negated(buffer, index_list, n, lattice);
+#endif
         }
     }
 #endif

@@ -45,7 +45,7 @@ void gather_test() {
             hila::terminate(1);
         }
 
-#ifndef EVEN_SITES_FIRST
+#ifdef EVEN_SITES_FIRST
         onsites(EVEN) {
             dif1 += abs(f1[X + d] - f2[X]);
             dif2 += abs(f1[X] - f2[X - d]);
