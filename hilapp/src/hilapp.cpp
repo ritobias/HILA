@@ -47,6 +47,10 @@ llvm::cl::OptionCategory HilappCategory(program_name);
 llvm::cl::opt<bool> cmdline::dump_ast("dump-ast", llvm::cl::desc("Dump AST tree"),
                                       llvm::cl::cat(HilappCategory));
 
+llvm::cl::opt<bool> cmdline::show_includes("show-include-paths",
+                                           llvm::cl::desc("Show hilapp include paths"),
+                                           llvm::cl::cat(HilappCategory));
+
 llvm::cl::opt<std::string> cmdline::dummy_def("D", llvm::cl::value_desc("macro[=value]"),
                                               llvm::cl::desc("Define name/macro for preprocessor"),
                                               llvm::cl::cat(HilappCategory));
@@ -75,6 +79,12 @@ llvm::cl::opt<bool> cmdline::syntax_only("syntax-only", llvm::cl::desc("Same as 
 llvm::cl::opt<std::string> cmdline::output_filename(
     "o", llvm::cl::desc("Output file (default: <file>.cpt, write to stdout: -o - "),
     llvm::cl::value_desc("filename"), llvm::cl::Prefix, llvm::cl::cat(HilappCategory));
+
+llvm::cl::opt<std::string> cmdline::static_compiler(
+    GET_INCLUDES_WITH,
+    llvm::cl::desc(
+        "compiler to help find std include files (default: latest g++, disable with 'none')"),
+    llvm::cl::value_desc("compiler"), llvm::cl::cat(HilappCategory));
 
 // llvm::cl::opt<bool>
 //     cmdline::no_mpi("no-mpi",
@@ -128,15 +138,6 @@ llvm::cl::opt<bool> cmdline::c_openmp("target:openmp", llvm::cl::desc("Hybrid Op
 
 // Debug and Utility arguments
 
-// llvm::cl::opt<bool> cmdline::func_attribute("function-attributes",
-//       llvm::cl::desc("write pragmas/attributes to functions called from loops"),
-//       llvm::cl::cat(HilappCategory));
-
-llvm::cl::opt<bool>
-    cmdline::slow_gpu_reduce("gpu-slow-reduce",
-                             llvm::cl::desc("Use slow (but memory economical) reduction on gpus"),
-                             llvm::cl::cat(HilappCategory));
-
 llvm::cl::opt<int> cmdline::verbosity("verbosity",
                                       llvm::cl::desc("Verbosity level 0-2.  Default 0 (quiet)"),
                                       llvm::cl::cat(HilappCategory));
@@ -152,10 +153,6 @@ llvm::cl::opt<bool>
                              llvm::cl::desc("Comment out '#pragma hila' -pragmas in output"),
                              llvm::cl::cat(HilappCategory));
 
-llvm::cl::opt<bool> cmdline::insert_includes(
-    "insert-includes",
-    llvm::cl::desc("Insert all project #include files in .cpt -files (portable)"),
-    llvm::cl::cat(HilappCategory));
 
 llvm::cl::opt<bool> cmdline::no_include(
     "no-include",
@@ -172,7 +169,7 @@ int cmdline::argc;
 const char **cmdline::argv;
 
 /// Check command line arguments and set appropriate flags in target
-void handle_cmdline_arguments(codetype &target) {
+void handle_cmdline_target(codetype &target) {
     if (cmdline::CUDA) {
         target.cuda = true;
     } else if (cmdline::HIP) {
@@ -1014,8 +1011,7 @@ class MyFrontendAction : public ASTFrontendAction {
     MyFrontendAction() {}
 
     virtual bool BeginSourceFileAction(CompilerInstance &CI) override {
-        // llvm::errs() << "** Starting operation on source file
-        // "+getCurrentFile()+"\n";
+        // llvm::errs() << "** Starting operation on source file" + getCurrentFile()+"\n";
 
         // Insert preprocessor callback functions to the stream.  This enables
         // tracking included files, ranges etc.
@@ -1129,15 +1125,16 @@ class MyFrontendAction : public ASTFrontendAction {
 
                             llvm::errs() << "\n *** ERROR: '#pragma once' in file:row "
                                          << r.loc.printToString(SM) << '\n';
-                            llvm::errs() << "#pragma once is not allowed in include files containing "
-                                            "hila code, because hilapp "
-                                            "rearranges include file contents.\n"
-                                            "Use standard include guards instead\n"
-                                            "  #ifndef SOME_INCLUDE_GUARD_NAME_\n"
-                                            "  #define SOME_INCLUDE_GUARD_NAME_\n"
-                                            "  ...\n"
-                                            "  #endif\n";
-                            
+                            llvm::errs()
+                                << "#pragma once is not allowed in include files containing "
+                                   "hila code, because hilapp "
+                                   "rearranges include file contents.\n"
+                                   "Use standard include guards instead\n"
+                                   "  #ifndef SOME_INCLUDE_GUARD_NAME_\n"
+                                   "  #define SOME_INCLUDE_GUARD_NAME_\n"
+                                   "  ...\n"
+                                   "  #endif\n";
+
                             exit(1);
                         }
                     }
@@ -1200,7 +1197,7 @@ class MyFrontendAction : public ASTFrontendAction {
                 file_id_list.clear();
 
                 for (file_buffer &fb : file_buffer_list) {
-                    if (fb.sbuf.is_modified() || cmdline::insert_includes)
+                    if (fb.sbuf.is_modified())
                         set_fid_modified(fb.fid);
                 }
 
@@ -1259,19 +1256,29 @@ int main(int argc, const char **argv) {
     cmdline::argv = argv;
 
     // av takes over from argv
-    const char **av = new const char *[argc + 6];
-    argc = rearrange_cmdline(argc, argv, av);
-    av[argc++] = "-std=c++17"; // use c++17 std
-    av[argc++] = "-DHILAPP";   // add global defn
-    av[argc] = nullptr;
+    std::vector<const char *> av;
+    std::string compiler = handle_cmdline_args(argc, argv, av);
 
-    OptionsParser op(argc, av, HilappCategory);
+    argc = av.size() - 1;  // last is nullptr;
+    OptionsParser op(argc, av.data(), HilappCategory);
     ClangTool Tool(op.getCompilations(), op.getSourcePathList());
 
     // We have command line args, possibly do something with them
-    handle_cmdline_arguments(target);
+    handle_cmdline_target(target);
+
     if (cmdline::syntax_only)
         cmdline::no_output = true;
+
+    if (cmdline::show_includes) {
+        llvm::errs() << "----- hilapp include file paths ";
+        if (compiler.size() > 0) 
+            llvm::errs() << "(with compiler " << compiler << ")";
+        llvm::errs() << '\n';
+        for (const char * p : av) {
+            if (p && p[0] == '-' && p[1] == 'I') 
+                llvm::errs() << "    " << p + 2 << '\n';
+        }
+    }
 
     // ClangTool::run accepts a FrontendActionFactory, which is then used to
     // create new objects implementing the FrontendAction interface. Here we use
