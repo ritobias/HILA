@@ -235,7 +235,7 @@ void hila::initialize(int argc, char **argv) {
 #if defined(CUDA) || defined(HIP)
     hila::out0 << "Using thread blocks of size " << N_threads << " threads\n";
 
-#if defined(GPU_AWARE_MPI)
+#if defined(GPU_AWARE_MPI) && GPU_AWARE_MPI == 1
     hila::out0 << "Using GPU_AWARE_MPI\n";
 #else
     hila::out0 << "Not using GPU_AWARE_MPI\n";

@@ -11,6 +11,7 @@ settings.json
 *.o
 *~
 #*#
+*poly_prof*
 *profile_ft_nsm*
 *profile_nsm*
 *poly_dump_*

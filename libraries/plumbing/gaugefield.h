@@ -256,7 +256,7 @@ class GaugeField {
                 ok = ok && (lattice.size(d) % insize[d] == 0);
                 if (!ok)
                     hila::out0 << conferr << "incorrect lattice dimension " << hila::prettyprint(d)
-                               << " is " << f << " should be (or divide)" << lattice.size(d)
+                               << " is " << f << " should be (or be divisible by)" << lattice.size(d)
                                << '\n';
             }
         }

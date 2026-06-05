@@ -791,6 +791,26 @@ std::vector<T> Field<T>::get_elements(const std::vector<CoordinateVector> &coord
     return res;
 }
 
+/// Set a subvolume of the field elements to all nodes
+template <typename T>
+void Field<T>::set_subvolume(const std::vector<T> &elements, const CoordinateVector &cmin,
+                             const CoordinateVector &cmax) {
+
+    assert_all_ranks_present();
+    size_t vol = 1;
+    foralldir (d) {
+        vol *= cmax[d] - cmin[d] + 1;
+        assert(cmax[d] >= cmin[d] && cmin[d] >= 0 && cmax[d] < lattice.size(d));
+    }
+    std::vector<CoordinateVector> clist(vol);
+    CoordinateVector c;
+
+    size_t i = 0;
+    forcoordinaterange(c, cmin, cmax) {
+        clist[i++] = c;
+    }
+    set_elements(elements, clist);
+}
 
 /// Get a subvolume of the field elements to all nodes
 template <typename T>
@@ -813,6 +833,22 @@ std::vector<T> Field<T>::get_subvolume(const CoordinateVector &cmin, const Coord
     return get_elements(clist, bcast);
 }
 
+/// Set a slice (subvolume)
+template <typename T>
+void Field<T>::set_slice(const std::vector<T> &elements, const CoordinateVector &c) {
+
+    assert_all_ranks_present();
+    CoordinateVector cmin, cmax;
+    foralldir (d) {
+        if (c[d] < 0) {
+            cmin[d] = 0;
+            cmax[d] = lattice.size(d) - 1;
+        } else {
+            cmin[d] = cmax[d] = c[d];
+        }
+    }
+    set_subvolume(elements, cmin, cmax);
+}
 
 /// Get a slice (subvolume)
 template <typename T>
@@ -820,13 +856,14 @@ std::vector<T> Field<T>::get_slice(const CoordinateVector &c, bool bcast) const 
 
     assert_all_ranks_present();
     CoordinateVector cmin, cmax;
-    foralldir (d)
+    foralldir (d) {
         if (c[d] < 0) {
             cmin[d] = 0;
             cmax[d] = lattice.size(d) - 1;
         } else {
             cmin[d] = cmax[d] = c[d];
         }
+    }
     return get_subvolume(cmin, cmax, bcast);
 }
 

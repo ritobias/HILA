@@ -1452,8 +1452,13 @@ class Field {
     std::vector<T> get_elements(const std::vector<CoordinateVector> &coord_list,
                                 bool broadcast = false) const;
 
+    void set_subvolume(const std::vector<T> &elements, const CoordinateVector &cmin,
+                  const CoordinateVector &cmax);
+
     std::vector<T> get_subvolume(const CoordinateVector &cmin, const CoordinateVector &cmax,
                                  bool broadcast = false) const;
+
+    void set_slice(const std::vector<T> &elements, const CoordinateVector &c);
 
     std::vector<T> get_slice(const CoordinateVector &c, bool broadcast = false) const;
 

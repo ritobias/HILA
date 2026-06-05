@@ -153,4 +153,117 @@ void get_force_impr(const GaugeField<group> &U, out_only VectorField<Algebra<gro
 }
 
 
+template <typename T>
+using plaqw_t = std::array<std::array<Field<T>, NDIM>, NDIM>;
+
+template <typename group, typename wT, typename atype = hila::arithmetic_type<group>>
+double measure_s_impr(const GaugeField<group> &U, const plaqw_t<wT> &plaqw, atype c11, atype c12) {
+    // measure the improved action for dir1<dir2
+    Reduction<double> stot = 0;
+    stot.allreduce(false).delayed(true);
+    Field<group> tP;
+    foralldir (dir1)
+        foralldir (dir2)
+            if (dir1 < dir2) {
+                U[dir2].start_gather(dir1, ALL);
+                U[dir1].start_gather(dir2, ALL);
+                onsites (ALL) {
+                    // plaquettes:
+                    tP[X] = conj(plaqw[dir1][dir2][X]) * U[dir1][X] * U[dir2][X + dir1] *
+                            (U[dir2][X] * U[dir1][X + dir2]).dagger();
+
+                    // plaquette part:
+                    stot += c11 *
+                            (1.0 - real(trace(tP[X])) / group::size());
+                }
+
+                tP.start_gather(dir1, ALL);
+                tP.start_gather(dir2, ALL);
+
+                onsites (ALL) {
+                    // 2x1-rectangle part:
+                    stot += c12 * (1.0 - real(trace(U[dir1][X] * tP[X + dir1] *
+                                                    U[dir1][X].dagger() * tP[X])) /
+                                             group::size());
+                    // 1x2-rectangle part:
+                    stot += c12 * (1.0 - real(trace(tP[X] * U[dir2][X] * tP[X + dir2] *
+                                                    U[dir2][X].dagger())) /
+                                             group::size());
+                }
+            }
+    return stot.value();
+}
+
+template <typename group, typename wT, typename atype = hila::arithmetic_type<group>>
+void get_force_impr_add(const GaugeField<group> &U, const plaqw_t<wT> &plaqw,
+                        VectorField<Algebra<group>> &K, atype c11, atype c12) {
+    // compute the force for the improved action -S_{impr}=\beta/N*(c11*ReTr(plaq)+c12*ReTr(rect))
+    // in an even faster way and add the results to K
+    Field<group> ustap;
+    Field<group> lstap;
+    Field<group> tstap;
+    bool first;
+    foralldir (dir1) {
+        first = true;
+        foralldir (dir2)
+            if (dir1 != dir2) {
+                U[dir2].start_gather(dir1, ALL);
+                U[dir1].start_gather(dir2, ALL);
+
+                // get upper (dir1,dir2) and lower (dir1,-dir2) staples
+                onsites (ALL) {
+                    lstap[X] = plaqw[dir1][dir2][X] * (U[dir1][X] * U[dir2][X + dir1]).dagger() *
+                               U[dir2][X];
+                    ustap[X] = conj(plaqw[dir1][dir2][X]) * U[dir2][X + dir1] *
+                               (U[dir2][X] * U[dir1][X + dir2]).dagger();
+                }
+
+                lstap.start_gather(-dir2, ALL);
+
+                // sum the staples for dir1-link
+                if (first) {
+                    onsites (ALL) {
+                        tstap[X] = ustap[X];
+                        tstap[X] += lstap[X - dir2];
+                    }
+                    first = false;
+                } else {
+                    onsites (ALL) {
+                        tstap[X] += ustap[X];
+                        tstap[X] += lstap[X - dir2];
+                    }
+                }
+
+                // compute rectangle contribution to force (if any) and add it to K
+                if (c12 != 0) {
+                    // compose rectangle and store it in ustap
+                    onsites (ALL)
+                        ustap[X] = lstap[X - dir2].dagger() * ustap[X];
+
+                    // corresponding path
+                    std::vector<Direction> path = {-dir2, dir1, dir2, dir2, -dir1, -dir2};
+
+                    // compute rectangle force and add it to K
+                    get_wloop_force_from_wl_add(U, path, ustap, c12, K);
+                }
+            }
+        // compute plaquette contribution to force and add it to K
+        onsites (ALL) {
+            K[dir1][X] -= (U[dir1][X] * tstap[X]).project_to_algebra_scaled(c11);
+        }
+    }
+}
+
+template <typename group, typename wT, typename atype = hila::arithmetic_type<group>>
+void get_force_impr(const GaugeField<group> &U, const plaqw_t<wT> &plaqw,
+                    out_only VectorField<Algebra<group>> &K, atype c11, atype c12) {
+    // compute the force for the improved action -S_{impr}=\beta/N*(c11*ReTr(plaq)+c12*ReTr(rect))
+    // in an even faster way and write the results to K
+    foralldir (d1) {
+        K[d1][ALL] = 0;
+    }
+    get_force_impr_add(U, plaqw, K, c11, c12);
+}
+
+
 #endif

@@ -12,12 +12,18 @@ config name            config
 bds direction          2
 bds shift              1
 updates/centering      5
-updates/profile meas   10
+updates/profile meas   2
+updates/sprofile meas  0
 updates/surf spec meas 2
-use log smearing       1
-presmearing steps      2
-smearing steps         0,5,20,40,80
+use log smearing       2
+presmearing steps      5
+smearing steps         5,10,20,40,80
 smear coefficient      0.9
 z smearing steps       10,10,10,10,10
 traj/surface           0
 traj/polyakov dump     10
+gflow freq             0
+gflow max lambda       8.
+gflow lambda step      0.1
+gflow abs. accuracy    1.0e-7
+gflow rel. accuracy    1.0e-4

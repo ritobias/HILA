@@ -154,4 +154,72 @@ void get_force_bp_add2(const GaugeField<group> &U, VectorField<Algebra<group>> &
 }
 */
 
+
+template <typename T>
+using plaqw_t = std::array<std::array<Field<T>, NDIM>, NDIM>;
+
+template <typename group, typename wT>
+double measure_s_bp(const GaugeField<group> &U, const plaqw_t<wT> &plaqw) {
+    // measure the BP plaquette action
+    Reduction<double> plaq = 0;
+    plaq.allreduce(false).delayed(true);
+    foralldir (dir1)
+        foralldir (dir2)
+            if (dir1 < dir2) {
+                U[dir2].start_gather(dir1, ALL);
+                U[dir1].start_gather(dir2, ALL);
+                onsites (ALL) {
+                    plaq += real(trace(bp_iOsqmat(conj(plaqw[dir1][dir2][X]) * U[dir1][X] *
+                                                  U[dir2][X + dir1] *
+                                                  (U[dir2][X] * U[dir1][X + dir2]).dagger()))) /
+                                group::size() -
+                            1.0;
+                }
+            }
+    return plaq.value();
+}
+
+template <typename group, typename wT, typename atype = hila::arithmetic_type<group>>
+void get_force_bp_add(const GaugeField<group> &U, const plaqw_t<wT> &plaqw,
+                      VectorField<Algebra<group>> &K, atype eps = 1.0) {
+    // compute force for BP action for n=2 according to Eq. (B5) of arXiv:2306.14319 and add it to K
+    Field<group> fmatp;
+    Field<group> fmatmd1;
+    Field<group> fmatmd2;
+    atype teps = 2.0 * eps;
+    foralldir (d1) {
+        foralldir (d2)
+            if (d1 < d2) {
+                U[d2].start_gather(d1, ALL);
+                U[d1].start_gather(d2, ALL);
+                onsites (ALL) {
+                    fmatp[X] = bp_UAmat(conj(plaqw[dir1][dir2][X]) * U[d1][X] * U[d2][X + d1] *
+                                        (U[d2][X] * U[d1][X + d2]).dagger());
+                    fmatmd1[X] = (fmatp[X] * U[d2][X]).dagger() *
+                                 U[d2][X]; // parallel transport fmatp[X].dagger() to X+d2
+                    fmatmd2[X] = U[d1][X].dagger() * fmatp[X] *
+                                 U[d1][X]; // parallel transport fmatp[X] to X+d1
+                }
+                fmatmd1.start_gather(-d2, ALL);
+                fmatmd2.start_gather(-d1, ALL);
+                onsites (ALL) {
+                    K[d1][X] -= (fmatmd1[X - d2] + fmatp[X]).project_to_algebra_scaled(teps);
+                    K[d2][X] -= (fmatmd2[X - d1] - fmatp[X]).project_to_algebra_scaled(teps);
+                }
+            }
+    }
+}
+
+template <typename group, typename wT, typename atype = hila::arithmetic_type<group>>
+void get_force_bp(const GaugeField<group> &U, const plaqw_t<wT> &plaqw,
+                  out_only VectorField<Algebra<group>> &K, atype eps = 1.0) {
+    // compute force for BP action for n=2 according to Eq. (B5) of arXiv:2306.14319 and write it to
+    // K
+    foralldir (d1) {
+        K[d1][ALL] = 0;
+    }
+    get_force_bp_add(U, plaqw, K, eps);
+}
+
+
 #endif
