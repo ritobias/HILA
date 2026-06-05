@@ -667,7 +667,7 @@ void measure_interface(const Field<Complex<T>> &ismS, Direction dz, slT surface_
 
     size_x = lattice.size(dx);
     size_y = lattice.size(dy);
-    size_z = lattice.size(dz);
+    int size_z = lattice.size(dz);
 
     int area = size_x * size_y;
 
@@ -917,7 +917,7 @@ void measure_interface_ft(const Field<Complex<T>> &ismS, Direction dz, int bds_s
 
     size_x = lattice.size(dx);
     size_y = lattice.size(dy);
-    size_z = lattice.size(dz);
+    int size_z = lattice.size(dz);
 
     int area = size_x * size_y;
 
