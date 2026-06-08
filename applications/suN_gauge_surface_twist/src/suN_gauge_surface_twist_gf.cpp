@@ -416,7 +416,7 @@ std::vector<pT> measure_polyakov_profile(const GaugeField<group> &U, Direction d
     measure_polyakov_field_complex(U[e_t], pl);
 
     ReductionVector<pT> p(lattice.size(dz), 0);
-    p.delayed(true).allreduce(false);
+    p.delayed(true).allreduce(true);
     onsites(ALL) if (X.coordinate(e_t) == 0) {
         p[X.coordinate(dz)] += pl[X] / area;
     }
@@ -449,7 +449,7 @@ std::vector<Complex<T>> measure_polyakov_profile_from_pl(const Field<Complex<T>>
     int area = size_x * size_y;
 
     ReductionVector<Complex<T>> p(lattice.size(dz), 0);
-    p.delayed(true).allreduce(false);
+    p.delayed(true).allreduce(true);
     onsites (ALL) if (X.coordinate(e_t) == 0) {
         p[X.coordinate(dz)] += pl[X] / area;
     }
@@ -488,7 +488,7 @@ std::vector<Complex<T>> measure_polyakov_profile_from_pl_shifted(const Field<Com
     hila::broadcast(surf);
 
     ReductionVector<Complex<T>> p(size_z, 0);
-    p.delayed(true).allreduce(false);
+    p.delayed(true).allreduce(true);
    
     onsites (ALL) {
         CoordinateVector Xpos = X.coordinates();
@@ -872,7 +872,9 @@ void measure_profile_l(const Field<Complex<T>> &smS, Direction d, std::vector<sT
         }
     }
     p.reduce();
-    profile = p.vector();
+    if (hila::myrank() == 0) {
+        profile = p.vector();
+    }
 }
 
 template <typename T, typename sT>
@@ -888,13 +890,15 @@ void measure_profile(const Field<Complex<T>> &smS, Direction d, T midpoint,
     }
     p.reduce();
     profile.resize(p.size());
-    for (int i = 0; i < p.size(); ++i) {
-        if (abs(p[i]) > 0) {
-            profile[i] = proj_to_range(arg(p[i]) - midpoint) + midpoint;
-        } else {
-            profile[i] = 0;
+    if (hila::myrank() == 0) {
+        for (int i = 0; i < p.size(); ++i) {
+            if (abs(p[i]) > 0) {
+                profile[i] = proj_to_range(arg(p[i]) - midpoint) + midpoint;
+            } else {
+                profile[i] = 0;
+            }
         }
-    }
+    } 
 }
 
 template <typename group, typename sT, typename wT>

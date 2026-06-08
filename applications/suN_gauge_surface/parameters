@@ -18,4 +18,5 @@ smear coefficient      0.9
 z smearing steps       10,10,10,10,10,10
 traj/surface           0
 traj/polyakov dump     0
+traj/sts polyakov dump 10
 

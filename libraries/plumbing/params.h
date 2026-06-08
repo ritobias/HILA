@@ -72,7 +72,7 @@
 /// Size of the write buffer in field writes, in bytes
 /// Larger buffer -> less MPI calls in writing, but more memory
 #ifndef WRITE_BUFFER_SIZE
-#define WRITE_BUFFER_SIZE 2000000
+#define WRITE_BUFFER_SIZE 1048576
 #endif
 
 

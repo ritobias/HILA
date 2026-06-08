@@ -41,6 +41,7 @@ struct parameters {
     std::vector<int> z_smear;
     int n_surface;
     int n_dump_polyakov;
+    int n_dump_sts_polyakov;
 };
 
 template <int ni, int nf>
@@ -253,6 +254,25 @@ void measure_polyakov_field(const Field<T> &Ut, Field<pT> &pl) {
     }
 }
 
+template <typename T>
+void measure_polyakov_field_full(const Field<T> &Ut, Field<T> &pl) {
+
+    Field<T> tpl[2];
+    onsites (ALL) {
+        tpl[0][X] = Ut[X];
+    }
+    int ip = 0;
+    for (int plane = lattice.size(e_t) - 2; plane >= 0; plane--) {
+        onsites (ALL) {
+            tpl[1 - ip][X] = Ut[X] * tpl[ip][X + e_t];
+        }
+        ip = 1 - ip;
+    }
+    onsites (ALL) {
+        pl[X] = tpl[ip][X];
+    }
+}
+
 template <typename T, typename pT=Complex<hila::arithmetic_type<T>>>
 void measure_polyakov_field_complex(const Field<T> &Ut, Field<pT> &pl) {
     Field<T> polyakov = Ut;
@@ -278,7 +298,7 @@ void measure_polyakov_field_complex(const Field<T> &Ut, Field<pT> &pl) {
     }
 }
 
-////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////
 
 template <typename T, typename aT>
 void smear_polyakov_field(Field<T> &pl, int nsmear, aT smear_coeff) {
@@ -298,6 +318,46 @@ void smear_polyakov_field(Field<T> &pl, int nsmear, aT smear_coeff) {
         }
     }
 }
+
+/////////////////////////////////////////////////////////////////////////////
+
+template <typename T, typename aT>
+void smear_spat_field_full(VectorField<T> &sU, aT smear_param, int n_smear) {
+    if (n_smear > 0) {
+        aT coeff = smear_param / (1.0 + (2.0 * smear_param * (NDIM - 1)));
+        aT dcoeff = smear_param / (1.0 + 2.0 * smear_param);
+        Field<T> tstap, ttstap;
+        for (int ism = 0; ism < n_smear; ++ism) {
+            onsites (ALL) {
+                tstap[X] = 0;
+            }
+            foralldir (d) {
+                if (d < e_t) {
+                    onsites (ALL) {
+                        tstap[X] += sU[d][X] * sU[e_t][X + d] * sU[d][X].dagger();
+                        ttstap[X] = sU[d][X].dagger() * sU[e_t][X] * sU[d][X];
+                    }
+                    onsites (ALL) {
+                        tstap[X] += ttstap[X - d];
+                        T ustap = sU[e_t][X] * sU[d][X] * sU[e_t][X + d].dagger() +
+                                  sU[e_t][X].dagger() * sU[d][X] * sU[e_t][X + d];
+                        sU[d][X] = chexp((ustap * sU[d][X].dagger())
+                                             .project_to_algebra_scaled(dcoeff)
+                                             .expand()) *
+                                   sU[d][X];
+                    }
+                }
+            }
+            onsites (ALL) {
+                sU[e_t][X] = chexp((tstap[X] * sU[e_t][X].dagger())
+                                       .project_to_algebra_scaled(coeff)
+                                       .expand()) *
+                             sU[e_t][X];
+            }
+        }
+    }
+}
+
 
 /////////////////////////////////////////////////////////////////////////////
 
@@ -1146,7 +1206,7 @@ int main(int argc, char **argv) {
         p.z_smear = par.get("z smearing steps");
         p.n_surface = par.get("traj/surface");
         p.n_dump_polyakov = par.get("traj/polyakov dump");
-
+        p.n_dump_sts_polyakov = par.get("traj/sts polyakov dump");
         if (p.n_smear.size() != p.z_smear.size()) {
             hila::out0 << "Error in input file: number of values in 'smearing steps' != 'z "
                           "smearing steps'\n";
@@ -1245,21 +1305,20 @@ int main(int argc, char **argv) {
                 //measure_polyakov_surface(U, p, trajectory);
                 int64_t idump = (trajectory + 1) / p.n_surf_spec;
 
-                Field<double> smS, tsmS, tsmS2;
-
-                measure_polyakov_field(U[e_t], smS);
-
                 ftype surface_level = p_now;
                 if (p.polyakov_pot == poly_limit::RANGE || p.polyakov_pot == poly_limit::AUTORANGE) {
                     surface_level = 0.5 * (p.poly_min + p.poly_max);
                 }
                 hila::out0 << string_format("SURFLEV %0.5f\n", surface_level);
 
+
+                Field<double> smS, tsmS, tsmS2;
+
+                measure_polyakov_field(U[e_t], smS);
                 int n_smear = 0;
-                if(p.n_smear.size() == 0 || p.n_smear[0] != 0) {
+                if (p.n_smear.size() == 0 || p.n_smear[0] != 0) {
                     measure_interface_spectrum_ft(smS, e_z, n_smear, idump, p, first_pow);
                 }
-
                 for (int ism = 0; ism < p.n_smear.size(); ++ism) {
                     int smear = p.n_smear[ism];
                     smear_polyakov_field(smS, smear - n_smear, p.smear_coeff);
@@ -1277,7 +1336,7 @@ int main(int argc, char **argv) {
                     }
                     if(n_smear > 0) {
                         measure_interface_spectrum(tsmS, e_z, surface_level, n_smear, idump, p,
-                                                   avp12, avp21, dsloc, first_pow);
+                                                avp12, avp21, dsloc, first_pow);
                     }
                     measure_interface_spectrum_ft(smS, e_z, n_smear, idump, p, first_pow);
 
@@ -1296,6 +1355,7 @@ int main(int argc, char **argv) {
                         pl.config_slice_write(dump_file, {-1, -1, -1, 0});
                     }
                 }
+
                 first_pow = false;
 
                 if(p.n_tune_poly_range > 0) {
@@ -1318,6 +1378,33 @@ int main(int argc, char **argv) {
                         "gavp12=% 0.4f, dsloc=% 6.2f, poly_min=% 0.4f, poly_max=% 0.4f\n", 0.5 * (gavp12u + gavp12l),
                         gdsloc, p.poly_min, p.poly_max);
 
+                }
+            }
+            if (p.n_dump_sts_polyakov && (trajectory + 1) % p.n_dump_sts_polyakov == 0) {
+                // stout type smearing test
+                VectorField<mygroup> smS00;
+                smS00 = U;
+                measure_polyakov_field_full(U[e_t], smS00[e_t]);
+
+                int n_smear = 0;
+                for (int ism = 0; ism < p.n_smear.size(); ++ism) {
+                    int smear = p.n_smear[ism];
+                    smear_spat_field_full(smS00, p.smear_coeff, smear - n_smear);
+                    if (smear > n_smear) {
+                        n_smear = smear;
+                    }
+
+                    Field<float> pl;
+                    onsites (ALL) {
+                        pl[X] = real(trace(smS00[e_t][X]));
+                    }
+
+                    int icdump = (trajectory + 1) / p.n_dump_sts_polyakov;
+                    for (int tslice = 0; tslice < lattice.size(e_t); ++tslice) {
+                        std::string dump_file =
+                            string_format("poly_dump_stout-type_smear_%04d_%03d_nsm%04d", icdump, tslice, n_smear);
+                        pl.config_slice_write(dump_file, {-1, -1, -1, tslice});
+                    }
                 }
             }
         }

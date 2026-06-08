@@ -482,7 +482,9 @@ void measure_profile_l(const Field<Complex<T>> &smS, Direction d, std::vector<sT
         }
     }
     p.reduce();
-    profile = p.vector();
+    if (hila::myrank() == 0) {
+        profile = p.vector();
+    }
 }
 
 template <typename T, typename sT>
@@ -497,11 +499,13 @@ void measure_profile(const Field<Complex<T>> &smS, Direction d, T midpoint, std:
     }
     p.reduce();
     profile.resize(p.size());
-    for (int i = 0; i < p.size(); ++i) {
-        if (abs(p[i]) > 0) {
-            profile[i] = proj_to_range(arg(p[i]) - midpoint) + midpoint;
-        } else {
-            profile[i] = 0;
+    if (hila::myrank() == 0) {
+        for (int i = 0; i < p.size(); ++i) {
+            if (abs(p[i]) > 0) {
+                profile[i] = proj_to_range(arg(p[i]) - midpoint) + midpoint;
+            } else {
+                profile[i] = 0;
+            }
         }
     }
 }
@@ -584,11 +588,13 @@ void measure_profile_ft(const Field<Complex<T>> &smS, Direction d, T midpoint,
     }
     p.reduce();
     profile.resize(p.size());
-    for (int i = 0; i < p.size(); ++i) {
-        if (abs(p[i]) > 0) {
-            profile[i] = proj_to_range(arg(p[i]) - midpoint);
-        } else {
-            profile[i] = 0;
+    if (hila::myrank() == 0) {
+        for (int i = 0; i < p.size(); ++i) {
+            if (abs(p[i]) > 0) {
+                profile[i] = proj_to_range(arg(p[i]) - midpoint);
+            } else {
+                profile[i] = 0;
+            }
         }
     }
 }
