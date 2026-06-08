@@ -474,7 +474,7 @@ void smear_spat_field_l(Field<Complex<T>> &smS, const VectorField<sT> &shift, aT
 template <typename T, typename sT>
 void measure_profile_l(const Field<Complex<T>> &smS, Direction d, std::vector<sT> &profile) {
     ReductionVector<sT> p(lattice.size(d));
-    p.allreduce(false).delayed(true);
+    p.allreduce(false).delayed(false);
     sT area = (sT)(lattice.volume() / lattice.size(d) / lattice.size(e_t));
     onsites(ALL) {
         if (X.coordinate(e_t) == 0) {
@@ -490,7 +490,7 @@ void measure_profile_l(const Field<Complex<T>> &smS, Direction d, std::vector<sT
 template <typename T, typename sT>
 void measure_profile(const Field<Complex<T>> &smS, Direction d, T midpoint, std::vector<sT> &profile) {
     ReductionVector<Complex<T>> p(lattice.size(d));
-    p.allreduce(false).delayed(true);
+    p.allreduce(false).delayed(false);
     sT area = (sT)(lattice.volume() / lattice.size(d) / lattice.size(e_t));
     onsites(ALL) {
         if (X.coordinate(e_t) == 0) {
@@ -579,7 +579,7 @@ template <typename T, typename sT>
 void measure_profile_ft(const Field<Complex<T>> &smS, Direction d, T midpoint,
                      std::vector<sT> &profile) {
     ReductionVector<Complex<T>> p(lattice.size(d));
-    p.allreduce(false).delayed(true);
+    p.allreduce(false).delayed(false);
     sT area = (sT)(lattice.volume() / lattice.size(d) / lattice.size(e_t));
     onsites (ALL) {
         if (X.coordinate(e_t) == 0) {
@@ -610,7 +610,7 @@ void center_interface_ft(GaugeField<group> &U, const plaqw_t<wT> &plaqw,
 
     if (first) {
         first = false;
-        ft_basis.resize(lattice.size(dz));
+        ft_basis.resize(size_z);
         aT tsign = (aT)1.0;
         if (bds_shift > 0) {
             tsign = -tsign;
