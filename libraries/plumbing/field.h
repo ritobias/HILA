@@ -2265,7 +2265,7 @@ void Field<T>::drop_comms(Parity p) const {
     if (is_ref_of == nullptr) {
         for (Direction d = (Direction)0; d < NDIRS; ++d) {
             // check if there's ongoing comms, invalidate it!
-            drop_comms(d, opp_parity(p));
+            drop_comms(d, p);
         }
     } else {
         is_ref_of->drop_comms(p);
