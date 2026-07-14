@@ -110,11 +110,9 @@ void bwrite_to_file(const bwrite_to_file_header<ni, nf> &header, const std::vect
                 }
                 ofile.write((char *)ibuff, ibuffsize * sizeof(int64_t));
 
-                ofile.write((char *)head.fhead.data(), fbuffsize * sizeof(double));
-
+                ofile.write((char *)header.fhead.data(), fbuffsize * sizeof(double));
 
                 ofile.close();
-                free(fbuff);
                 free(ibuff);
             }
         }
