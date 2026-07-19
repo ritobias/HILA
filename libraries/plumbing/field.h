@@ -359,9 +359,8 @@ class Field {
      */
     Field(const Field &other) : Field() {
         assert(other.is_initialized(ALL) && "Initializer Field value not set");
-
+        allocate();
         (*this)[ALL] = other[X];
-
     }
     /**
      * @internal
@@ -372,7 +371,7 @@ class Field {
     template <typename A, std::enable_if_t<std::is_convertible<A, T>::value, int> = 0>
     Field(const Field<A> &other) : Field() {
         assert(other.is_initialized(ALL) && "Initializer Field value not set");
-
+        allocate();
         (*this)[ALL] = other[X];
     }
     /**
@@ -386,6 +385,7 @@ class Field {
               std::enable_if_t<
                   hila::is_assignable<T &, A>::value || std::is_convertible<A, T>::value, int> = 0>
     Field(const A &val) : Field() {
+        allocate();
         (*this)[ALL] = val;
     }
     /**
@@ -394,6 +394,7 @@ class Field {
      * @param z
      */
     Field(const std::nullptr_t z) : Field() {
+        allocate();
         (*this)[ALL] = 0;
     }
 

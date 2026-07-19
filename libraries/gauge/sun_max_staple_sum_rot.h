@@ -18,8 +18,8 @@
 template <typename T, int N>
 SU<N, T> suN_max_staple_sum_rot(const SU<N, T> &staple) {
 
-    SU<N, T> tl0(staple);
-    SU<N, T> U(1.0);
+    SU<N, T> tl0 = staple;
+    SU<N, T> U = 1.0;
 
     // get a random permutation of the list of possible matrix indices
     int tperm[N];
