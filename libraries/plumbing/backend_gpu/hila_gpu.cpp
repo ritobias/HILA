@@ -123,7 +123,7 @@ void hila::free_device_rng() {
 __device__ __host__ double hila::random() {
 #ifdef _GPU_DEVICE_COMPILE_
     unsigned x = threadIdx.x + blockIdx.x * blockDim.x;
-    return gpurand_uniform(&d_gpurandstateptr[x]);
+    return 1.0 - gpurand_uniform(&d_gpurandstateptr[x]);
 #else
     return hila::host_random();
 #endif
