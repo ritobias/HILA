@@ -406,9 +406,13 @@ class Field {
      * @param rhs
      */
     Field(Field &&rhs) {
+        assert(rhs.is_initialized(ALL) && "Field to be moved not initialized");
         fs = rhs.fs;
         is_ref_of = rhs.is_ref_of;
-        has_refs = rhs.has_refs;
+        has_refs.resize(lattice.nn_map.size());
+        for (int i = 0; i < lattice.nn_map.size(); ++i) {
+            has_refs[i] = rhs.has_refs[i];
+        }
         rhs.fs = nullptr;
         rhs.is_ref_of = nullptr;
         for (int i = 0; i < rhs.has_refs.size(); ++i) {
@@ -468,6 +472,7 @@ class Field {
         for (Direction d = (Direction)0; d < NDIRS; ++d) {
             fs->neighbours[d] = lattice.neighb[d] + fs->nn_topo * lattice.mynode.volume();
 #if defined(CUDA) || defined(HIP)
+            gpuStreamSynchronize(0);
             fs->payload.neighbours[d] =
                 lattice.backend_lattice->d_neighb[d] + fs->nn_topo * lattice.mynode.volume();
 #endif
@@ -536,6 +541,7 @@ class Field {
         for (Direction d = (Direction)0; d < NDIRS; ++d) {
             fs->neighbours[d] = lattice.neighb[d] + fs->nn_topo * lattice.mynode.volume();
 #if defined(CUDA) || defined(HIP)
+            gpuStreamSynchronize(0);
             fs->payload.neighbours[d] =
                 lattice.backend_lattice->d_neighb[d] + fs->nn_topo * lattice.mynode.volume();
 #endif
@@ -782,6 +788,7 @@ class Field {
         for (Direction d = (Direction)0; d < NDIRS; ++d) {
             fs->neighbours[d] = lattice.neighb[d] + fs->nn_topo * lattice.mynode.volume();
 #if defined(CUDA) || defined(HIP)
+            gpuStreamSynchronize(0);
             fs->payload.neighbours[d] =
                 lattice.backend_lattice->d_neighb[d] + fs->nn_topo * lattice.mynode.volume();
 #endif
@@ -1100,8 +1107,12 @@ class Field {
             } else {
                 // current field has not been initialized; will steel all data from rhs field:
                 fs = rhs.fs; // steel whole field_struct
-                has_refs = rhs.has_refs; // information on fields that reference the stolen field buffer
                 is_ref_of = rhs.is_ref_of; // information of owner field of stolen field buffer
+                // information on fields that reference the stolen field buffer:
+                has_refs.resize(lattice.nn_map.size());
+                for (int i = 0; i < lattice.nn_map.size(); ++i) {
+                    has_refs[i] = rhs.has_refs[i];
+                }
 
                 // remove reference information from rhs field
                 rhs.fs = nullptr;
