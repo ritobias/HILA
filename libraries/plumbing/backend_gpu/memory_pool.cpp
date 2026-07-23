@@ -8,9 +8,6 @@
 #include <list>
 #include <iomanip>
 
-// no real need for HILAPP to go through here
-#if !defined(HILAPP)
-
 #if defined(HIP)
 #define gpuMallocDirect(a, b) GPU_CHECK(hipMalloc(a, b))
 #define gpuFreeDirect(a) GPU_CHECK(hipFree(a))
@@ -20,6 +17,10 @@
 #else
 static_assert(0 && "HIP or CUDA must be defined");
 #endif
+
+// no real need for HILAPP to go through here
+#if !defined(HILAPP)
+
 
 #if defined(GPU_MEMORY_POOL)
 // Compile with make .. OPTS="-DPOOL_DEBUG"
