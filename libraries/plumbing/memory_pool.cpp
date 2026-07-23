@@ -8,7 +8,7 @@
 
 #if !defined(HILAPP)
 
-#if defined(GPU_MEMORY_POOL)
+
 
 #if defined(HIP)
 #define gpuMallocDirect(a, b) GPU_CHECK(hipMalloc(a, b))
@@ -20,7 +20,7 @@
 static_assert(0 && "HIP or CUDA must be defined");
 #endif
 
-#endif
+#if defined(GPU_MEMORY_POOL)
 
 
 // keep relatively large min allocation
@@ -80,7 +80,7 @@ void *hila::memory_pool::alloc(size_t req_size) {
         ptr->in_use = true;
 
 #ifdef POOL_DEBUG
-        hila::out << "GPU MEMORY: request " << req_size << " gave block " << ptr->size
+        hila::out << "GPU : request " << req_size << " gave block " << ptr->size
                   << " current total " << total_size << '\n';
 #endif
         return (ptr->ptr);
@@ -164,6 +164,8 @@ void hila::memory_pool::purge() {
     }
     blocklist.resize(ptr - blocklist.begin());
 }
+
+#endif
 
 
 #ifdef GPU_MEMORY_POOL

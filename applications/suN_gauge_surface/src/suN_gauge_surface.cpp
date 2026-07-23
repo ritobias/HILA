@@ -262,7 +262,7 @@ void measure_polyakov_field_full(const Field<T> &Ut, Field<T> &pl) {
         tpl[0][X] = Ut[X];
     }
     int ip = 0;
-    for (int plane = lattice.size(e_t) - 2; plane >= 0; plane--) {
+    for (int i = 1; i < lattice.size(e_t); ++i) {
         onsites (ALL) {
             tpl[1 - ip][X] = Ut[X] * tpl[ip][X + e_t];
         }
@@ -324,7 +324,7 @@ void smear_polyakov_field(Field<T> &pl, int nsmear, aT smear_coeff) {
 template <typename T, typename aT>
 void smear_spat_field_full(VectorField<T> &sU, aT smear_param, int n_smear) {
     if (n_smear > 0) {
-        aT coeff = smear_param / (1.0 + (2.0 * smear_param * (NDIM - 1)));
+        aT coeff = smear_param / (1.0 + 2.0 * smear_param * (NDIM - 1));
         aT dcoeff = smear_param / (1.0 + 2.0 * smear_param);
         Field<T> tstap, ttstap;
         for (int ism = 0; ism < n_smear; ++ism) {
@@ -353,6 +353,57 @@ void smear_spat_field_full(VectorField<T> &sU, aT smear_param, int n_smear) {
                                        .project_to_algebra_scaled(coeff)
                                        .expand()) *
                              sU[e_t][X];
+            }
+        }
+    }
+}
+
+template <typename T, typename aT>
+void smear_spat_field_full_alldir(VectorField<T> &sU, aT smear_param,
+                                  int n_smear) {
+    if (n_smear > 0) {
+        aT coeff = smear_param / (1.0 + (2.0 * smear_param * (NDIM - 1)));
+        aT dcoeff = coeff;
+        Field<T> lstap;
+        VectorField<T> ttstap;
+        for (int ism = 0; ism < n_smear; ++ism) {
+            onsites (ALL) {
+                ttstap[e_t][X] = 0;
+            }
+            foralldir (d1) {
+                if (d1 < e_t) {
+                    onsites (ALL) {
+                        ttstap[e_t][X] +=
+                            sU[d1][X] * sU[e_t][X + d1] * sU[d1][X].dagger();
+                        lstap[X] = sU[d1][X].dagger() * sU[e_t][X] * sU[d1][X];
+                    }
+                    onsites (ALL) {
+                        ttstap[e_t][X] += lstap[X - d1];
+                        ttstap[d1][X] =
+                            sU[e_t][X] * sU[d1][X] * sU[e_t][X + d1].dagger() +
+                            sU[e_t][X].dagger() * sU[d1][X] * sU[e_t][X + d1];
+                    }
+                    foralldir (d2) {
+                        if (d2 != d1 && d2 < e_t) {
+                            onsites (ALL) {
+                                ttstap[d1][X] +=
+                                    sU[d2][X] * sU[d1][X + d2] * sU[d2][X + d1].dagger();
+                                lstap[X] = sU[d2][X].dagger() * sU[d1][X] * sU[d2][X + d1];
+                            }
+                            onsites (ALL) {
+                                ttstap[d1][X] += lstap[X - d2];
+                            }
+                        }
+                    }
+                }
+            }
+            foralldir (d1) {
+                onsites (ALL) {
+                    sU[d1][X] = chexp((ttstap[d1][X] * sU[d1][X].dagger())
+                                          .project_to_algebra_scaled(coeff)
+                                          .expand()) *
+                                sU[d1][X];
+                }
             }
         }
     }
@@ -1389,7 +1440,7 @@ int main(int argc, char **argv) {
                 int n_smear = 0;
                 for (int ism = 0; ism < p.n_smear.size(); ++ism) {
                     int smear = p.n_smear[ism];
-                    smear_spat_field_full(smS00, p.smear_coeff, smear - n_smear);
+                    smear_spat_field_full_alldir(smS00, p.smear_coeff, smear - n_smear);
                     if (smear > n_smear) {
                         n_smear = smear;
                     }

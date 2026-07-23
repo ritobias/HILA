@@ -113,7 +113,9 @@ void hila::free_device_rng() {
                           gpuMemcpyHostToDevice);
 
         // good to purge the memory pool after releasing a large chunk
+#if defined(GPU_MEMORY_POOL)
         gpu_memory_pool_purge();
+#endif
     }
 }
 

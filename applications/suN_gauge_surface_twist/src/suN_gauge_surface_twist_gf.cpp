@@ -409,14 +409,15 @@ std::vector<pT> measure_polyakov_profile(const GaugeField<group> &U, Direction d
 
     int size_x = lattice.size(dx);
     int size_y = lattice.size(dy);
+    int size_z = lattice.size(dz);
 
     int area = size_x * size_y;
 
     Field<pT> pl;
     measure_polyakov_field_complex(U[e_t], pl);
 
-    ReductionVector<pT> p(lattice.size(dz), 0);
-    p.delayed(true).allreduce(true);
+    ReductionVector<pT> p(size_z, 0);
+    p.delayed(false).allreduce(true);
     onsites(ALL) if (X.coordinate(e_t) == 0) {
         p[X.coordinate(dz)] += pl[X] / area;
     }
@@ -445,11 +446,12 @@ std::vector<Complex<T>> measure_polyakov_profile_from_pl(const Field<Complex<T>>
 
     int size_x = lattice.size(dx);
     int size_y = lattice.size(dy);
+    int size_z = lattice.size(dz);
 
     int area = size_x * size_y;
 
-    ReductionVector<Complex<T>> p(lattice.size(dz), 0);
-    p.delayed(true).allreduce(true);
+    ReductionVector<Complex<T>> p(size_z, 0);
+    p.delayed(false).allreduce(true);
     onsites (ALL) if (X.coordinate(e_t) == 0) {
         p[X.coordinate(dz)] += pl[X] / area;
     }
@@ -488,7 +490,7 @@ std::vector<Complex<T>> measure_polyakov_profile_from_pl_shifted(const Field<Com
     hila::broadcast(surf);
 
     ReductionVector<Complex<T>> p(size_z, 0);
-    p.delayed(true).allreduce(true);
+    p.delayed(false).allreduce(true);
    
     onsites (ALL) {
         CoordinateVector Xpos = X.coordinates();
@@ -682,8 +684,9 @@ void smear_spat_field_full(VectorField<T> &sU, const VectorField<sT> &shift, aT 
                     }
                     onsites (ALL) {
                         tstap[X] += ttstap[X - d];
-                        T ustap = sU[e_t][X] * sU[d][X] * sU[e_t][X + d].dagger() +
-                                  sU[e_t][X].dagger() * sU[d][X] * sU[e_t][X + d];
+                        T ustap =
+                            sU[e_t][X] * sU[d][X] * sU[e_t][X + d].dagger() * shift[d][X] +
+                            sU[e_t][X].dagger() * sU[d][X] * sU[e_t][X + d] * conj(shift[d][X]);
                         sU[d][X] = chexp((ustap * sU[d][X].dagger())
                                              .project_to_algebra_scaled(dcoeff)
                                              .expand()) *
@@ -706,48 +709,46 @@ void smear_spat_field_full_alldir(VectorField<T> &sU, const VectorField<sT> &shi
                            int n_smear) {
     if (n_smear > 0) {
         aT coeff = smear_param / (1.0 + (2.0 * smear_param * (NDIM - 1)));
-        aT dcoeff = coeff / lattice.size(e_t);
-        Field<T> tstap, ustap, lstap;
+        aT dcoeff = coeff;
+        Field<T> lstap;
+        VectorField<T> ttstap;
         for (int ism = 0; ism < n_smear; ++ism) {
             onsites (ALL) {
-                tstap[X] = 0;
+                ttstap[e_t][X] = 0;
             }
             foralldir (d1) {
                 if (d1 < e_t) {
                     onsites (ALL) {
-                        tstap[X] +=
+                        ttstap[e_t][X] +=
                             sU[d1][X] * sU[e_t][X + d1] * sU[d1][X].dagger() * conj(shift[d1][X]);
-                        tstap[X] +=
-                            sU[d1][X - d1].dagger() * sU[e_t][X - d1] * sU[d1][X - d1] * shift[d1][X - d1];
+                        lstap[X] = sU[d1][X].dagger() * sU[e_t][X] * sU[d1][X] * shift[d1][X];
                     }
                     onsites (ALL) {
-                        ustap[X] = sU[e_t][X] * sU[d1][X] * sU[e_t][X + d1].dagger() +
-                                   sU[e_t][X].dagger() * sU[d1][X] * sU[e_t][X + d1];
+                        ttstap[e_t][X] += lstap[X - d1];
+                        ttstap[d1][X] =
+                            sU[e_t][X] * sU[d1][X] * sU[e_t][X + d1].dagger() * shift[d1][X] +
+                            sU[e_t][X].dagger() * sU[d1][X] * sU[e_t][X + d1] * conj(shift[d1][X]);
                     }
                     foralldir (d2) {
                         if (d2 != d1 && d2 < e_t) {
                             onsites(ALL) {
-                                ustap[X] += sU[d2][X] * sU[d1][X + d2] * sU[d2][X + d1].dagger();
+                                ttstap[d1][X] += sU[d2][X] * sU[d1][X + d2] * sU[d2][X + d1].dagger();
                                 lstap[X] = sU[d2][X].dagger() * sU[d1][X] * sU[d2][X + d1];
                             }
                             onsites (ALL) {
-                                ustap[X] += lstap[X - d2];
+                                ttstap[d1][X] += lstap[X - d2];
                             }
                         }
                     }
-                    onsites (ALL) {
-                        sU[d1][X] = chexp((ustap[X] * sU[d1][X].dagger())
-                                              .project_to_algebra_scaled(dcoeff)
-                                              .expand()) *
-                                    sU[d1][X];
-                    }
                 }
             }
-            onsites (ALL) {
-                sU[e_t][X] = chexp((tstap[X] * sU[e_t][X].dagger())
-                                       .project_to_algebra_scaled(coeff)
-                                       .expand()) *
-                             sU[e_t][X];
+            foralldir (d1) {
+                onsites (ALL) {
+                    sU[d1][X] = chexp((ttstap[d1][X] * sU[d1][X].dagger())
+                                           .project_to_algebra_scaled(coeff)
+                                           .expand()) *
+                                 sU[d1][X];
+                }
             }
         }
     }
@@ -864,7 +865,7 @@ void smear_spat_field_l(Field<Complex<T>> &smS, const VectorField<sT> &shift, aT
 template <typename T, typename sT>
 void measure_profile_l(const Field<Complex<T>> &smS, Direction d, std::vector<sT> &profile) {
     ReductionVector<sT> p(lattice.size(d));
-    p.allreduce(false).delayed(true);
+    p.allreduce(false).delayed(false);
     sT area = (sT)(lattice.volume() / lattice.size(d) / lattice.size(e_t));
     onsites(ALL) {
         if (X.coordinate(e_t) == 0) {
@@ -881,7 +882,7 @@ template <typename T, typename sT>
 void measure_profile(const Field<Complex<T>> &smS, Direction d, T midpoint,
                      std::vector<sT> &profile) {
     ReductionVector<Complex<T>> p(lattice.size(d));
-    p.allreduce(false).delayed(true);
+    p.allreduce(false).delayed(false);
     sT area = (sT)(lattice.volume() / lattice.size(d) / lattice.size(e_t));
     onsites(ALL) {
         if (X.coordinate(e_t) == 0) {
@@ -969,7 +970,7 @@ template <typename T, typename sT>
 void measure_profile_ft(const Field<Complex<T>> &smS, Direction d, T midpoint,
                         std::vector<sT> &profile) {
     ReductionVector<Complex<T>> p(lattice.size(d));
-    p.allreduce(false).delayed(true);
+    p.allreduce(false).delayed(false);
     sT area = (sT)(lattice.volume() / lattice.size(d) / lattice.size(e_t));
     onsites (ALL) {
         if (X.coordinate(e_t) == 0) {
