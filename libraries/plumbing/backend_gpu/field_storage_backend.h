@@ -17,6 +17,7 @@ void field_storage<T>::allocate_field(const lattice_struct &lattice) {
 
 template <typename T>
 void field_storage<T>::free_field() {
+    gpuStreamSynchronize(0);
     if (fieldbuf != nullptr) {
         gpuFree(fieldbuf);
     }
@@ -34,6 +35,7 @@ void field_storage<T>::set_field_ref(const lattice_struct &lattice, const field_
 
 template <typename T>
 void field_storage<T>::remove_field_ref() {
+    gpuStreamSynchronize(0);
     fieldbuf = nullptr;
 }
 
