@@ -472,7 +472,6 @@ class Field {
         for (Direction d = (Direction)0; d < NDIRS; ++d) {
             fs->neighbours[d] = lattice.neighb[d] + fs->nn_topo * lattice.mynode.volume();
 #if defined(CUDA) || defined(HIP)
-            gpuStreamSynchronize(0);
             fs->payload.neighbours[d] =
                 lattice.backend_lattice->d_neighb[d] + fs->nn_topo * lattice.mynode.volume();
 #endif
@@ -541,7 +540,6 @@ class Field {
         for (Direction d = (Direction)0; d < NDIRS; ++d) {
             fs->neighbours[d] = lattice.neighb[d] + fs->nn_topo * lattice.mynode.volume();
 #if defined(CUDA) || defined(HIP)
-            gpuStreamSynchronize(0);
             fs->payload.neighbours[d] =
                 lattice.backend_lattice->d_neighb[d] + fs->nn_topo * lattice.mynode.volume();
 #endif
@@ -788,7 +786,6 @@ class Field {
         for (Direction d = (Direction)0; d < NDIRS; ++d) {
             fs->neighbours[d] = lattice.neighb[d] + fs->nn_topo * lattice.mynode.volume();
 #if defined(CUDA) || defined(HIP)
-            gpuStreamSynchronize(0);
             fs->payload.neighbours[d] =
                 lattice.backend_lattice->d_neighb[d] + fs->nn_topo * lattice.mynode.volume();
 #endif

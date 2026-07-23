@@ -13,12 +13,10 @@ void field_storage<T>::allocate_field(const lattice_struct &lattice) {
         std::cout << "Failure in field memory allocation\n";
     }
     assert(fieldbuf != nullptr);
-    gpuStreamSynchronize(0);
 }
 
 template <typename T>
 void field_storage<T>::free_field() {
-    gpuStreamSynchronize(0);
     if (fieldbuf != nullptr) {
         gpuFree(fieldbuf);
     }
@@ -27,7 +25,6 @@ void field_storage<T>::free_field() {
 
 template <typename T>
 void field_storage<T>::set_field_ref(const lattice_struct &lattice, const field_storage<T> &other) {
-    gpuStreamSynchronize(0);
     fieldbuf = other.fieldbuf;
     if (fieldbuf == nullptr) {
         std::cout << "Failure in field memory referencing\n";
@@ -37,7 +34,6 @@ void field_storage<T>::set_field_ref(const lattice_struct &lattice, const field_
 
 template <typename T>
 void field_storage<T>::remove_field_ref() {
-    gpuStreamSynchronize(0);
     fieldbuf = nullptr;
 }
 
