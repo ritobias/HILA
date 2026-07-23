@@ -113,7 +113,9 @@ void hila::free_device_rng() {
                           gpuMemcpyHostToDevice);
 
         // good to purge the memory pool after releasing a large chunk
+#if defined(GPU_MEMORY_POOL)
         gpu_memory_pool_purge();
+#endif
     }
 }
 
@@ -151,9 +153,11 @@ void backend_lattice_struct::setup(lattice_struct &lattice) {
             lattice.get_neighbour_array((Direction)d, hila::bc::ANTIPERIODIC);
 
         if (special_neighb != lattice.neighb[d]) {
-            gpuMalloc(&(d_neighb_special[d]), lattice.mynode.volume() * sizeof(unsigned));
+            gpuMalloc(&(d_neighb_special[d]),
+                      lattice.mynode.volume() * lattice.nn_map.size() * sizeof(unsigned));
             gpuMemcpy(d_neighb_special[d], special_neighb,
-                      lattice.mynode.volume() * sizeof(unsigned), gpuMemcpyHostToDevice);
+                      lattice.mynode.volume() * lattice.nn_map.size() * sizeof(unsigned),
+                      gpuMemcpyHostToDevice);
         } else {
             d_neighb_special[d] = d_neighb[d];
         }

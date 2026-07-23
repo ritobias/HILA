@@ -342,8 +342,8 @@ dir_mask_t Field<T>::start_gather(Direction d, Parity p) const {
     T *receive_buffer;
     T *send_buffer;
 
-    size_t size_type;
-    MPI_Datatype mpi_type = get_MPI_number_type<T>(size_type);
+    //size_t size_type;
+    //MPI_Datatype mpi_type = get_MPI_number_type<T>(size_type);
 
 #ifndef GENGATHER
     if (from_node.rank != hila::myrank() && boundary_need_to_communicate(d)) {

@@ -834,11 +834,15 @@ class Field {
         fs->neighbours[-dir] = lattice.get_neighbour_array(-dir, bc, fs->nn_topo);
 #else
         if (bc == hila::bc::PERIODIC) {
-            fs->payload.neighbours[dir] = lattice.backend_lattice->d_neighb[dir];
-            fs->payload.neighbours[-dir] = lattice.backend_lattice->d_neighb[-dir];
+            fs->payload.neighbours[dir] =
+                lattice.backend_lattice->d_neighb[dir] + fs->nn_topo * mynode.volume();
+            fs->payload.neighbours[-dir] =
+                lattice.backend_lattice->d_neighb[-dir] + fs->nn_topo * mynode.volume();
         } else {
-            fs->payload.neighbours[dir] = lattice.backend_lattice->d_neighb_special[dir];
-            fs->payload.neighbours[-dir] = lattice.backend_lattice->d_neighb_special[-dir];
+            fs->payload.neighbours[dir] =
+                lattice.backend_lattice->d_neighb_special[dir] + fs->nn_topo * mynode.volume();
+            fs->payload.neighbours[-dir] =
+                lattice.backend_lattice->d_neighb_special[-dir] + fs->nn_topo * mynode.volume();
         }
 #endif
 

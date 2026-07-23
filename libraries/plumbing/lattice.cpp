@@ -692,9 +692,7 @@ void lattice_struct::create_gen_std_gathers() {
             assert(even_odd_mismatch == false && "even/odd sites mismatch in communication");
 
             // order of communication with involved nodes per direction will be according to
-            // decreasing message size. (this ensures that the send-buffers allocated for sending the
-            // message to the first node can also be used for sending the messages to the other
-            // nodes)
+            // decreasing message size.
             std::stable_sort(
                 from_nodel.begin(), from_nodel.end(),
                 [](comm_node_struct a, comm_node_struct b) { return a.sites > b.sites; });
@@ -760,10 +758,7 @@ void lattice_struct::create_gen_std_gathers() {
                                 neighb_d[i] = c_offset + c_even;
                                 if (c_offset + c_even >= (1ULL << 32))
                                     too_large_node = 1;
-#ifndef VANILLA
-                                from_node.sitelist[c_even] = i;
-#endif
-                                // flipped parity: this is for odd sends
+
                                 to_node_os[c_even] = {in, i};
 
                                 ++c_even;
@@ -771,10 +766,7 @@ void lattice_struct::create_gen_std_gathers() {
                                 neighb_d[i] = c_offset + from_node.evensites + c_odd;
                                 if (c_offset + from_node.evensites + c_odd >= (1ULL << 32))
                                     too_large_node = 1;
-#ifndef VANILLA
-                                from_node.sitelist[from_node.evensites + c_odd] = i;
-#endif
-                                // flipped parity: this is for even sends
+
                                 to_node_es[c_odd] = {in, i};
 
                                 ++c_odd;
@@ -788,6 +780,9 @@ void lattice_struct::create_gen_std_gathers() {
                                          [](auto i1, auto i2) { return i1.c[0] < i2.c[0]; });
                         for (size_t i = 0; i < to_node.evensites; ++i) {
                             to_node.sitelist[i] = to_node_es[i].c[1];
+#ifndef VANILLA
+                            from_node.sitelist[from_node.evensites + i] = to_node_es[i].c[1];
+#endif
                         }
                     }
                     if(to_node.oddsites>0) {
@@ -797,6 +792,9 @@ void lattice_struct::create_gen_std_gathers() {
                                          [](auto i1, auto i2) { return i1.c[0] < i2.c[0]; });
                         for (size_t i = 0; i < to_node.oddsites; ++i) {
                             to_node.sitelist[to_node.evensites + i] = to_node_os[i].c[1];
+#ifndef VANILLA
+                            from_node.sitelist[i] = to_node_os[i].c[1];
+#endif
                         }
                     }
 #if defined(CUDA) || defined(HIP)
@@ -935,7 +933,7 @@ const unsigned *lattice_struct::get_neighbour_array(Direction d, hila::bc bc, in
 
     // regular bc exit, should happen almost always
     if (special_boundaries[d].is_needed == false || bc == hila::bc::PERIODIC)
-        return neighb[d];
+        return neighb[d] + nn_topo * mynode.volume();
 
     if (special_boundaries[d].neighbours == nullptr) {
         setup_special_boundary_array(d);
