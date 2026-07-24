@@ -326,10 +326,13 @@ class Field {
 #endif
         fs = nullptr; // lazy allocation on 1st use
         is_ref_of = nullptr;
+        has_refs.resize(lattice.nn_map.size(), nullptr);
+        /*
         has_refs.resize(lattice.nn_map.size());
         for (int i = 0; i < lattice.nn_map.size(); ++i) {
             has_refs[i] = nullptr;
         }
+        */
     }
     /**
      * @internal
@@ -406,32 +409,31 @@ class Field {
      * @param rhs
      */
     Field(Field &&rhs) {
-        assert(rhs.is_initialized(ALL) && "Field to be moved not initialized");
+        assert(rhs.is_allocated() && "Field to be moved not initialized");
         fs = rhs.fs;
+        rhs.fs = nullptr;
         is_ref_of = rhs.is_ref_of;
+        rhs.is_ref_of = nullptr;
+        has_refs = std::move(rhs.has_refs);
+        /*
         has_refs.resize(lattice.nn_map.size());
         for (int i = 0; i < lattice.nn_map.size(); ++i) {
             has_refs[i] = rhs.has_refs[i];
-        }
-        rhs.fs = nullptr;
-        rhs.is_ref_of = nullptr;
-        for (int i = 0; i < rhs.has_refs.size(); ++i) {
             rhs.has_refs[i] = nullptr;
         }
-        if(fs != nullptr) {
-            if (is_ref_of == nullptr) { 
-                for (int i = 0; i < has_refs.size(); ++i) {
-                    if(i == fs->nn_topo) {
-                        has_refs[i] = this;
-                    } else {
-                        if(has_refs[i] != nullptr) {
-                            has_refs[i]->is_ref_of = this;
-                        }
+        */
+        if (is_ref_of == nullptr) { 
+            for (int i = 0; i < has_refs.size(); ++i) {
+                if(i == fs->nn_topo) {
+                    has_refs[i] = this;
+                } else {
+                    if(has_refs[i] != nullptr) {
+                        has_refs[i]->is_ref_of = this;
                     }
                 }
-            } else {
-                is_ref_of->has_refs[fs->nn_topo] = this;
             }
+        } else {
+            is_ref_of->has_refs[fs->nn_topo] = this;
         }
     }
 
@@ -1066,6 +1068,7 @@ class Field {
      * @return Field<T>&
      */
     Field<T> &operator=(Field<T> &&rhs) {
+        assert(rhs.is_allocated() && "Field to be moved not initialized");
         if (this != &rhs && rhs.fs != nullptr) {
             if(fs != nullptr) {
                 // to preserve referencing relations of the current field, we only steel the
@@ -1104,37 +1107,34 @@ class Field {
             } else {
                 // current field has not been initialized; will steel all data from rhs field:
                 fs = rhs.fs; // steel whole field_struct
+                rhs.fs = nullptr;
                 is_ref_of = rhs.is_ref_of; // information of owner field of stolen field buffer
+                rhs.is_ref_of = nullptr;
                 // information on fields that reference the stolen field buffer:
+                has_refs = std::move(rhs.has_refs);
+                /*
                 has_refs.resize(lattice.nn_map.size());
                 for (int i = 0; i < lattice.nn_map.size(); ++i) {
                     has_refs[i] = rhs.has_refs[i];
-                }
-
-                // remove reference information from rhs field
-                rhs.fs = nullptr;
-                rhs.is_ref_of = nullptr;
-                for (int i = 0; i < rhs.has_refs.size(); ++i) {
                     rhs.has_refs[i] = nullptr;
                 }
+                */
 
-                if (fs != nullptr) {
-                    // update field buffer referencing information with current field:
-                    if (is_ref_of == nullptr) {
-                        // current field is new owner of field buffer
-                        for (int i = 0; i < has_refs.size(); ++i) {
-                            if (i == fs->nn_topo) {
-                                has_refs[i] = this;
-                            } else {
-                                if (has_refs[i] != nullptr) {
-                                    has_refs[i]->is_ref_of = this;
-                                }
+                // update field buffer referencing information with current field:
+                if (is_ref_of == nullptr) {
+                    // current field is new owner of field buffer
+                    for (int i = 0; i < has_refs.size(); ++i) {
+                        if (i == fs->nn_topo) {
+                            has_refs[i] = this;
+                        } else {
+                            if (has_refs[i] != nullptr) {
+                                has_refs[i]->is_ref_of = this;
                             }
                         }
-                    } else {
-                        // current field is new referncing field to field buffer
-                        is_ref_of->has_refs[fs->nn_topo] = this;
                     }
+                } else {
+                    // current field is new referncing field to field buffer
+                    is_ref_of->has_refs[fs->nn_topo] = this;
                 }
             }
         }
