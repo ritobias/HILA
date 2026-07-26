@@ -1281,14 +1281,14 @@ int main(int argc, char **argv) {
     // use negative trajectory for thermal
     int start_traj = -p.n_thermal;
 
-    hila::timer update_timer("Updates");
-    hila::timer measure_timer("Measurements");
-
     restore_checkpoint(U, p.config_file, p.n_trajectories, start_traj);
 
     // We need random number here
     if (!hila::is_rng_seeded())
         hila::seed_random(seed);
+
+    hila::timer update_timer("Updates");
+    hila::timer measure_timer("Measurements");
 
     double p_prev = (double)NCOLOR;
     double p_now = measure_polyakov(U).real();

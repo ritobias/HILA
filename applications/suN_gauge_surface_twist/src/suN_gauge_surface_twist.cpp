@@ -1219,11 +1219,6 @@ int main(int argc, char **argv) {
     // the parameter
     lattice.setup(lsize);
 
-    // We need random number here
-    if (!hila::is_rng_seeded())
-        hila::seed_random(seed);
-
-
     // use negative trajectory number for thermalization
     int start_traj = -p.n_thermal;
 
@@ -1277,9 +1272,6 @@ int main(int argc, char **argv) {
     GaugeField<mygroup> U;
     U = 1;
 
-    hila::timer update_timer("Updates");
-    hila::timer measure_timer("Measurements");
-
     if(!restore_checkpoint(U, p.config_file, p.n_trajectories, start_traj)) {
         onsites(ALL) {
             U[e_t][X] = 1;
@@ -1288,6 +1280,13 @@ int main(int argc, char **argv) {
             }
         }
     }
+
+    // We need random number here
+    if (!hila::is_rng_seeded())
+        hila::seed_random(seed);
+
+    hila::timer update_timer("Updates");
+    hila::timer measure_timer("Measurements");
 
     double surface_level = ltw_ang / 2;
     hila::out0 << string_format("SURFLEV %0.5f\n", surface_level);
