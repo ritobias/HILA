@@ -178,7 +178,7 @@ void translate_config(GaugeField<group> &U, const plaqw_t<wT> &plaqw, Direction 
                 }
             } else {
                 onsites(ALL) {
-                    tU[X] = plaqw[opp_dir(dir1)][dir2][X + dir1] * U[dir2][X + dir1];
+                    tU[X] = plaqw[odir1][dir2][X + dir1] * U[dir2][X + dir1];
                 }
             }
         }
