@@ -121,6 +121,7 @@ void hila::seed_random(uint64_t seed, bool device_init) {
 
     // we can use the same seed, the generator is different
     if (device_init) {
+        hila::free_device_rng();
         hila::initialize_device_rng(seed);
     } else {
         hila::out0 << "Not initializing GPU random numbers\n";
