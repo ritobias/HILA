@@ -8,7 +8,7 @@
 
 #if !defined(HILAPP)
 
-#if defined(GPU_MEMORY_POOL)
+//#if defined(GPU_MEMORY_POOL)
 
 #if defined(HIP)
 #define gpuMallocDirect(a, b) GPU_CHECK(hipMalloc(a, b))
@@ -20,7 +20,7 @@
 static_assert(0 && "HIP or CUDA must be defined");
 #endif
 
-#endif
+//#endif
 
 
 // keep relatively large min allocation
