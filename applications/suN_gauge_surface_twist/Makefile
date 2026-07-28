@@ -41,26 +41,17 @@ ifdef SUN_OVERRELAX_dFJ
 APP_OPTS += -DSUN_OVERRELAX_dFJ
 endif
 
-# With multiple targets we want to use "make target", not "make build/target".
-# This is needed to carry the dependencies to build-subdir
-
-pre_targets = build/su${NCOL}_gauge_surface_twist
-
-pre_targets_gf = build/su${NCOL}_gauge_surface_twist_fs${GFLOWS}
-
-suN_gauge_surface_twist: $(pre_targets) ; @:
-
-suN_gauge_surface_twist_gf: $(pre_targets_gf) ; @:
-
 # Now the linking step for each target executable
-$(pre_targets): % : Makefile build/suN_gauge_surface_twist.o $(HILA_OBJECTS) $(HEADERS)
-	$(LD) -o $@ build/suN_gauge_surface_twist.o $(HILA_OBJECTS) $(LDFLAGS) $(LDLIBS) $(FFTW_LIB) -lfftw3
 
-$(pre_targets_gf): % : Makefile build/suN_gauge_surface_twist_gf.o $(HILA_OBJECTS) $(HEADERS)
-	$(LD) -o $@ build/suN_gauge_surface_twist_gf.o $(HILA_OBJECTS) $(LDFLAGS) $(LDLIBS) $(FFTW_LIB) -lfftw3
+SUFF=
+ifdef DEBUG
+ifeq (${DEBUG},1)
+SUFF=_debug
+endif
+endif
 
+suN_gauge_surface_twist: build/suN_gauge_surface_twist.o $(HILA_OBJECTS) $(HEADERS)
+	$(LD) -o build/su${NCOL}_gauge_surface_twist${SUFF} build/suN_gauge_surface_twist.o $(wildcard *.o) $(HILA_OBJECTS) $(LDFLAGS) $(LDLIBS) $(FFTW_LIB) -lfftw3
 
-
-
-
-
+suN_gauge_surface_twist_gf: build/suN_gauge_surface_twist_gf.o $(HILA_OBJECTS) $(HEADERS)
+	$(LD) -o build/su${NCOL}_gauge_surface_twist_fs${GFLOWS}${SUFF} build/suN_gauge_surface_twist_gf.o $(wildcard *.o) $(HILA_OBJECTS) $(LDFLAGS) $(LDLIBS) $(FFTW_LIB) -lfftw3
