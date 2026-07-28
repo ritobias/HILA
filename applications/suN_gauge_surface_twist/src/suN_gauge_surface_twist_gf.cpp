@@ -2215,14 +2215,22 @@ int main(int argc, char **argv) {
                         }
 
                         if (p.n_dump_polyakov && (trajectory + 1) % p.n_dump_polyakov == 0) {
+                            int icdump = (trajectory + 1) / p.n_dump_polyakov;
                             Field<float> pl;
                             onsites (ALL) {
                                 pl[X] = proj_to_range(arg(smS[X]) - surface_level) + surface_level;
                             }
-
-                            int icdump = (trajectory + 1) / p.n_dump_polyakov;
                             for (int tslice = 0; tslice < lattice.size(e_t); ++tslice) {
                                 std::string dump_file = string_format("poly_dump_%04d_%03d_nsm%04d",
+                                                                      icdump, tslice, n_smear);
+                                pl.config_slice_write(dump_file, {-1, -1, -1, tslice});
+                            }
+
+                            onsites (ALL) {
+                                pl[X] = abs(smS[X]);
+                            }
+                            for (int tslice = 0; tslice < lattice.size(e_t); ++tslice) {
+                                std::string dump_file = string_format("poly_abs_dump_%04d_%03d_nsm%04d",
                                                                       icdump, tslice, n_smear);
                                 pl.config_slice_write(dump_file, {-1, -1, -1, tslice});
                             }
