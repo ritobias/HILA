@@ -1807,6 +1807,17 @@ int main(int argc, char **argv) {
     // wilson flow relative accuracy (per integration step)
     p.gflow_r_accu = par.get("gflow rel. accuracy");
 
+    // updates between surface spectrum measurements
+    double inhomog_bf = 0.0;
+    int inhomog_b_sw = 0;
+    int inhomog_b_t = 0;
+    if (par.get_item("inhomog. beta factor", {"off", "%f"}) == 1) {
+        inhomog_bf = par.get();
+
+        inhomog_b_sw = par.get("inhomog. beta slice w");
+        inhomog_b_t = par.get("inhomog. beta duration");
+    }
+
     par.close(); // file is closed also when par goes out of scope
 
     // setting up the lattice is convenient to do after reading
@@ -1824,6 +1835,7 @@ int main(int argc, char **argv) {
     // action, as well as a twist vector field "shift" to implement the phase shift in the
     // Polyakov lop field.
     plaqw_t<Complex<ftype>> plaqw;
+    plaqw_t<Complex<ftype>> plaqw_br; // used for update only to e.g. implement inhomogeneous inverse coupling values
     VectorField<Complex<double>> shift;
     VectorField<double> lshift;
     double ltw_ang = 2.0 * M_PI * (double)bds_shift / (double)NCOLOR;
@@ -1854,6 +1866,18 @@ int main(int argc, char **argv) {
                     plaqw[d1][d2][X] = (ftype)1;
                     plaqw[d2][d1][X] = (ftype)1;
                 }
+            }
+        }
+    }
+    foralldir(d1) foralldir(d2) {
+        onsites (ALL) {
+            if (X.coordinate(bdt_dir) >= (lattice.size(bdt_dir) - inhomog_b_sw) / 2 &&
+                (X.coordinate(bdt_dir) < (lattice.size(bdt_dir) + inhomog_b_sw) / 2 ||
+                 (X.coordinate(bdt_dir) <= (lattice.size(bdt_dir)  + inhomog_b_sw) / 2 &&
+                  d1 != bdt_dir && d2 != bdt_dir))) {
+                plaqw_br[d1][d2][X] = (ftype)(1.0 + inhomog_bf) * plaqw[d1][d2][X];
+            } else {
+                plaqw_br[d1][d2][X] = (ftype)(1.0 - inhomog_bf) * plaqw[d1][d2][X];
             }
         }
     }
@@ -1897,8 +1921,11 @@ int main(int argc, char **argv) {
         double ttime = hila::gettime();
 
         update_timer.start();
-
-        do_trajectory(U, p, plaqw);
+        if (inhomog_bf != 0 && trajectory < inhomog_b_t) {
+            do_trajectory(U, p, plaqw_br);
+        } else {
+            do_trajectory(U, p, plaqw);
+        }
 
         // put sync here in order to get approx gpu timing
         hila::synchronize_threads();

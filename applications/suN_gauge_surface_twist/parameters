@@ -1,11 +1,11 @@
 # This is a parameter file for suN_gauge_surface_twisted
 
-lattice size           32,32,128,6
-beta                   10.82
-overrelax steps        5
-heatbath steps         5
-trajectories           100000
-thermalization         20
+lattice size           100,100,100,6
+beta                   10.7922
+overrelax steps        3
+heatbath steps         2
+trajectories           6
+thermalization         500
 random seed            0
 traj/saved             500
 config name            config
@@ -27,3 +27,7 @@ gflow max lambda       8.
 gflow lambda step      0.1
 gflow abs. accuracy    1.0e-7
 gflow rel. accuracy    1.0e-4
+inhomog. beta factor   -0.005
+inhomog. beta slice w  20
+inhomog. beta duration -200
+
