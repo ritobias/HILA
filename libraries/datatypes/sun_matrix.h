@@ -638,6 +638,26 @@ Algebra<SU<N, T>> log(const SU<N, T> &a) {
     return -res;
 }
 
+// rotate SU(N) matrix so that it's trace is in the trivial Z_N sector and return the resulting
+// matrix and the required number of Z_N shifts
+template <int N, typename T>
+SU<N, T> ZN_reduce(const SU<N, T> &a, int &zn) {
+    zn = 0;
+    const T pdn = M_PI / (T)N;
+    T argtr = arg(trace(a));
+    while(argtr > pdn) {
+        ++zn;
+        argtr -= (T)2.0 * pdn;
+    }
+    while (argtr <= pdn) {
+        --zn;
+        argtr += (T)2.0 * pdn;
+    }
+    Complex<T> znrot((T)1.0);
+    znrot.polar((T)1.0, -(T)(2.0 * zn) * pdn);
+    return a * znrot;
+}
+
 template <int N, typename T, typename MT, typename fT = hila::arithmetic_type<T>>
 void project_to_algebra_bilinear(const Matrix_t<N, N, T, MT> &w1, const Matrix_t<N, N, T, MT> &w2,
                                  out_only Matrix<N * N - 1, N * N - 1, fT> &omat,

@@ -42,6 +42,7 @@ struct parameters {
     int n_surface;
     int n_dump_polyakov;
     int n_dump_sts_polyakov;
+    int n_dump_znr_polyakov;
 };
 
 template <int ni, int nf>
@@ -297,6 +298,38 @@ void measure_polyakov_field_complex(const Field<T> &Ut, Field<pT> &pl) {
         pl[X] = trace(polyakov[X]);
     }
 }
+
+template <typename T, typename pT = Complex<hila::arithmetic_type<T>>, typename pTZN = int>
+void measure_ZN_reduced_polyakov_field_complex(const Field<T> &Ut, Field<pT> &pl,
+                                               Field<pTZN> &plZN) {
+    Field<T> polyakov = Ut;
+    Field<pTZN> polyakovZN = 0;
+
+    // mult links so that polyakov[X.dir == 0] contains the polyakov loop
+    for (int plane = lattice.size(e_t) - 2; plane >= 0; plane--) {
+
+        // safe_access(polyakov) pragma allows the expression below, otherwise
+        // hilapp would reject it because X and X+dir can refer to the same
+        // site on different "iterations" of the loop.  However, here this
+        // is restricted on single dir-plane so it works but we must tell it to hilapp.
+
+#pragma hila safe_access(polyakov,polyakovZN)
+        onsites (ALL) {
+            if (X.coordinate(e_t) == plane) {
+                int zn = 0;
+                polyakov[X] = ZN_reduce(Ut[X], zn) * polyakov[X + e_t];
+                polyakovZN[X] = zn + polyakovZN[X + e_t];
+            }
+        }
+    }
+
+    onsites (ALL)
+        if (X.coordinate(e_t) == 0) {
+            pl[X] = trace(polyakov[X]);
+            plZN[X] = polyakovZN[X];
+        }
+}
+
 
 /////////////////////////////////////////////////////////////////////////////
 
@@ -1258,6 +1291,7 @@ int main(int argc, char **argv) {
         p.n_surface = par.get("traj/surface");
         p.n_dump_polyakov = par.get("traj/polyakov dump");
         p.n_dump_sts_polyakov = par.get("traj/sts polyakov dump");
+        p.n_dump_znr_polyakov = par.get("traj/znr polyakov dump");
         if (p.n_smear.size() != p.z_smear.size()) {
             hila::out0 << "Error in input file: number of values in 'smearing steps' != 'z "
                           "smearing steps'\n";
@@ -1457,6 +1491,22 @@ int main(int argc, char **argv) {
                         pl.config_slice_write(dump_file, {-1, -1, -1, tslice});
                     }
                 }
+            }
+            if (p.n_dump_znr_polyakov && (trajectory + 1) % p.n_dump_znr_polyakov == 0) {
+                // smearing of Z_N reduced polyakov loop field
+                Field<Complex<ftype>> smS00 = 0;
+                Field<int> plZN = 0;
+                measure_ZN_reduced_polyakov_field_complex(U[e_t], smS00, plZN);
+                Field<float> pl;
+                onsites (ALL) {
+                    pl[X] = real(smS00[X]);
+                }
+                int icdump = (trajectory + 1) / p.n_dump_sts_polyakov;
+                std::string dump_file_znr =
+                        string_format("poly_dump_znr_%04d", icdump);
+                pl.config_slice_write(dump_file_znr, {-1, -1, -1, 0});
+                std::string dump_file_zn = string_format("poly_dump_zn_%04d", icdump);
+                plZN.config_slice_write(dump_file_zn, {-1, -1, -1, 0});
             }
         }
 
