@@ -1501,7 +1501,7 @@ int main(int argc, char **argv) {
                 onsites (ALL) {
                     pl[X] = real(smS00[X]);
                 }
-                int icdump = (trajectory + 1) / p.n_dump_sts_polyakov;
+                int icdump = (trajectory + 1) / p.n_dump_znr_polyakov;
                 std::string dump_file_znr =
                         string_format("poly_dump_znr_%04d", icdump);
                 pl.config_slice_write(dump_file_znr, {-1, -1, -1, 0});
