@@ -5,7 +5,7 @@ beta                   10.79191
 delta beta fraction    0.03
 overrelax steps        5
 heatbath steps         5
-trajectories           100000
+trajectories           10
 thermalization         200
 random seed            0
 traj/saved             500
