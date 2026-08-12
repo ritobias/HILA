@@ -645,11 +645,11 @@ SU<N, T> ZN_reduce(const SU<N, T> &a, int &zn) {
     zn = 0;
     const T pdn = M_PI / (T)N;
     T argtr = arg(trace(a));
-    while(argtr > pdn) {
+    while (argtr > pdn) {
         ++zn;
         argtr -= (T)2.0 * pdn;
     }
-    while (argtr <= pdn) {
+    while (argtr <= -pdn) {
         --zn;
         argtr += (T)2.0 * pdn;
     }
