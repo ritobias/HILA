@@ -302,11 +302,11 @@ void measure_polyakov_field_complex(const Field<T> &Ut, Field<pT> &pl) {
 template <typename T, typename pT = Complex<hila::arithmetic_type<T>>, typename pTZN = int>
 void measure_ZN_reduced_polyakov_field_complex(const Field<T> &Ut, Field<pT> &pl,
                                                Field<pTZN> &plZN) {
-    Field<T> polyakov = Ut;
+    Field<T> polyakov = 1;
     Field<pTZN> polyakovZN = 0;
 
     // mult links so that polyakov[X.dir == 0] contains the polyakov loop
-    for (int plane = lattice.size(e_t) - 2; plane >= 0; plane--) {
+    for (int plane = lattice.size(e_t) - 1; plane >= 0; plane--) {
 
         // safe_access(polyakov) pragma allows the expression below, otherwise
         // hilapp would reject it because X and X+dir can refer to the same
