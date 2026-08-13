@@ -392,6 +392,43 @@ void smear_spat_field_full(VectorField<T> &sU, aT smear_param, int n_smear) {
 }
 
 template <typename T, typename aT>
+void smear_spat_field_full_log(VectorField<T> &sU, aT smear_param, int n_smear) {
+    if (n_smear > 0) {
+        aT coeff = smear_param / (1.0 + 2.0 * smear_param * (NDIM - 1));
+        Field<T> tstap, ttstap;
+        Field<int> tznstap;
+        Field<T> logsUt;
+        Field<int> znsUt;
+        for (int ism = 0; ism < n_smear; ++ism) {
+            onsites (ALL) {
+                tstap[X] = 0;
+                tznstap[X] = 0;
+                int zn = 0;
+                logsUt[X] = log(ZN_reduce(sU[e_t][X], zn)).expand();
+                znsUt[X] = zn;
+            }
+            foralldir (d) {
+                if (d < e_t) {
+                    onsites (ALL) {
+                        tstap[X] += sU[d][X] * logsUt[X + d] * sU[d][X].dagger();
+                        ttstap[X] = sU[d][X].dagger() * logsUt[X] * sU[d][X];
+                        tznstap[X] += znsUt[X + d] + znsUt[X - d];
+                    }
+                    onsites (ALL) {
+                        tstap[X] += ttstap[X - d];
+                    }
+                }
+            }
+            onsites (ALL) {
+                aT tznphase = round(coeff * (aT)tznstap[X]) * 2.0 * M_PI / (aT)NCOLOR;
+                Complex<aT> znrot(cos(tznphase), sin(tznphase));
+                sU[e_t][X] = chexp(coeff * (tstap[X] + logsUt[X])) * znrot;
+            }
+        }
+    }
+}
+
+template <typename T, typename aT>
 void smear_spat_field_full_alldir(VectorField<T> &sU, aT smear_param,
                                   int n_smear) {
     if (n_smear > 0) {
@@ -1493,20 +1530,32 @@ int main(int argc, char **argv) {
                 }
             }
             if (p.n_dump_znr_polyakov && (trajectory + 1) % p.n_dump_znr_polyakov == 0) {
-                // smearing of Z_N reduced polyakov loop field
-                Field<Complex<ftype>> smS00 = 0;
-                Field<int> plZN = 0;
-                measure_ZN_reduced_polyakov_field_complex(U[e_t], smS00, plZN);
-                Field<float> pl;
-                onsites (ALL) {
-                    pl[X] = real(smS00[X]);
+                // stout type smearing test
+                VectorField<mygroup> smS00;
+                smS00 = U;
+                measure_polyakov_field_full(U[e_t], smS00[e_t]);
+
+                int n_smear = 0;
+                for (int ism = 0; ism < p.n_smear.size(); ++ism) {
+                    int smear = p.n_smear[ism];
+                    smear_spat_field_full_log(smS00, p.smear_coeff, smear - n_smear);
+                    if (smear > n_smear) {
+                        n_smear = smear;
+                    }
+
+                    Field<float> pl;
+                    onsites (ALL) {
+                        pl[X] = real(trace(smS00[e_t][X]));
+                    }
+
+                    int icdump = (trajectory + 1) / p.n_dump_znr_polyakov;
+                    for (int tslice = 0; tslice < lattice.size(e_t); ++tslice) {
+                        std::string dump_file =
+                            string_format("poly_dump_zn_log-type_smear_%04d_%03d_nsm%04d", icdump,
+                                          tslice, n_smear);
+                        pl.config_slice_write(dump_file, {-1, -1, -1, tslice});
+                    }
                 }
-                int icdump = (trajectory + 1) / p.n_dump_znr_polyakov;
-                std::string dump_file_znr =
-                        string_format("poly_dump_znr_%04d", icdump);
-                pl.config_slice_write(dump_file_znr, {-1, -1, -1, 0});
-                std::string dump_file_zn = string_format("poly_dump_zn_%04d", icdump);
-                plZN.config_slice_write(dump_file_zn, {-1, -1, -1, 0});
             }
         }
 
