@@ -653,8 +653,8 @@ SU<N, T> ZN_reduce(const SU<N, T> &a, int &zn) {
         --zn;
         argtr += (T)2.0 * pdn;
     }
-    Complex<T> znrot((T)1.0);
-    znrot.polar((T)1.0, -(T)(2.0 * zn) * pdn);
+    argtr = -(T)(2 * zn) * pdn;
+    Complex<T> znrot(cos(argtr), sin(argtr));
     return a * znrot;
 }
 

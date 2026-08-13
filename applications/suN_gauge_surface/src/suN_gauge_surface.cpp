@@ -419,7 +419,7 @@ void smear_spat_field_full_log(VectorField<T> &sU, aT smear_param, int n_smear) 
                 }
             }
             onsites (ALL) {
-                aT tznphase = round(coeff * (aT)tznstap[X]) * 2.0 * M_PI / (aT)NCOLOR;
+                aT tznphase = round(coeff * (aT)(znsUt[X] + tznstap[X])) * 2.0 * M_PI / (aT)NCOLOR;
                 Complex<aT> znrot(cos(tznphase), sin(tznphase));
                 sU[e_t][X] = chexp(coeff * (tstap[X] + sU[e_t][X])) * znrot;
             }
