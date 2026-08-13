@@ -395,7 +395,7 @@ template <typename T, typename aT>
 void smear_spat_field_full_log(VectorField<T> &sU, aT smear_param, int n_smear) {
     if (n_smear > 0) {
         aT coeff = smear_param / (1.0 + 2.0 * smear_param * (NDIM - 1));
-        Field<T> tstap;
+        Field<T> tstap, ttstap;
         Field<int> tznstap;
         Field<int> znsUt;
         for (int ism = 0; ism < n_smear; ++ism) {
@@ -410,8 +410,11 @@ void smear_spat_field_full_log(VectorField<T> &sU, aT smear_param, int n_smear) 
                 if (d < e_t) {
                     onsites (ALL) {
                         tstap[X] += sU[d][X] * sU[e_t][X + d] * sU[d][X].dagger();
-                        tstap[X] += sU[d][X - d].dagger() * sU[e_t][X - d] * sU[d][X - d];
+                        ttstap[X] = sU[d][X].dagger() * sU[e_t][X] * sU[d][X];
                         tznstap[X] += znsUt[X + d] + znsUt[X - d];
+                    }
+                    onsites (ALL) {
+                        tstap[X] += ttstap[X - d];
                     }
                 }
             }
