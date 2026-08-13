@@ -397,21 +397,20 @@ void smear_spat_field_full_log(VectorField<T> &sU, aT smear_param, int n_smear) 
         aT coeff = smear_param / (1.0 + 2.0 * smear_param * (NDIM - 1));
         Field<T> tstap, ttstap;
         Field<int> tznstap;
-        Field<T> logsUt;
         Field<int> znsUt;
         for (int ism = 0; ism < n_smear; ++ism) {
             onsites (ALL) {
                 tstap[X] = 0;
                 tznstap[X] = 0;
                 int zn = 0;
-                logsUt[X] = log(ZN_reduce(sU[e_t][X], zn)).expand();
+                sU[e_t][X] = log(ZN_reduce(sU[e_t][X], zn)).expand();
                 znsUt[X] = zn;
             }
             foralldir (d) {
                 if (d < e_t) {
                     onsites (ALL) {
-                        tstap[X] += sU[d][X] * logsUt[X + d] * sU[d][X].dagger();
-                        ttstap[X] = sU[d][X].dagger() * logsUt[X] * sU[d][X];
+                        tstap[X] += sU[d][X] * sU[e_t][X + d] * sU[d][X].dagger();
+                        ttstap[X] = sU[d][X].dagger() * sU[e_t][X] * sU[d][X];
                         tznstap[X] += znsUt[X + d] + znsUt[X - d];
                     }
                     onsites (ALL) {
@@ -422,7 +421,7 @@ void smear_spat_field_full_log(VectorField<T> &sU, aT smear_param, int n_smear) 
             onsites (ALL) {
                 aT tznphase = round(coeff * (aT)tznstap[X]) * 2.0 * M_PI / (aT)NCOLOR;
                 Complex<aT> znrot(cos(tznphase), sin(tznphase));
-                sU[e_t][X] = chexp(coeff * (tstap[X] + logsUt[X])) * znrot;
+                sU[e_t][X] = chexp(coeff * (tstap[X] + sU[e_t][X])) * znrot;
             }
         }
     }
