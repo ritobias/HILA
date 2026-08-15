@@ -1415,6 +1415,11 @@ int main(int argc, char **argv) {
     if (!hila::is_rng_seeded())
         hila::seed_random(seed);
 
+    if (start_traj >= 0 && p.deltab != 0) {
+        p.deltab = 0;
+        hila::out0 << "setting deltab = 0 (trajectory beyond thermalization)" << "\n";
+    }
+
     hila::timer update_timer("Updates");
     hila::timer measure_timer("Measurements");
 
@@ -1439,8 +1444,8 @@ int main(int argc, char **argv) {
             prl_stat.close();
         }
 
-        p.poly_min = (1.0 - p.poly_rel_tol) * 0.5 * gavp12l;
-        p.poly_max = (1.0 + p.poly_rel_tol) * 0.5 * gavp12u;
+        p.poly_min = (1.0 - 0.5 * p.poly_rel_tol) * 0.5 * gavp12l;
+        p.poly_max = (1.0 + 0.5 * p.poly_rel_tol) * 0.5 * gavp12u;
         hila::out0 << "poly min: " << p.poly_min << " , poly max: " << p.poly_max << "\n";
 
         avp12ul.resize(p.n_tune_poly_range, gavp12u);
@@ -1478,6 +1483,30 @@ int main(int argc, char **argv) {
         }
 
         measure_stuff(U, p);
+
+        if(trajectory == 0) {
+            if(p.deltab!=0) {
+                p.deltab = 0;
+                hila::out0 << "setting deltab=0 (end of thermalization reached)" << "\n";
+            }
+            if (p.n_tune_poly_range > 0) {
+                p_now = measure_polyakov(U).real();
+                avp12 = 0;
+                avp21 = 0;
+                dsloc = 0;
+                gavp12u = 2.0 * p_now;
+                gavp12l = 0;
+                gdsloc = lattice.size(e_z) / 2;
+                p.poly_min = (1.0 - 0.5 * p.poly_rel_tol) * 0.5 * gavp12l;
+                p.poly_max = (1.0 + 0.5 * p.poly_rel_tol) * 0.5 * gavp12u;
+                hila::out0 << "poly min: " << p.poly_min << " , poly max: " << p.poly_max << "\n";
+                for (int ipr = 0; ipr < p.n_tune_poly_range; ++ipr) {
+                    avp12ul[ipr] = gavp12u;
+                    avp12ll[ipr] = gavp12l;
+                    dslocl[ipr] = gdsloc;
+                }
+            }
+        }
 
         if (trajectory >= 0) {
             if (p.n_surf_spec && (trajectory + 1) % p.n_surf_spec == 0) {
@@ -1546,8 +1575,8 @@ int main(int argc, char **argv) {
                         gavp12l += (avp12 - avp12ll[tidump]) / p.n_tune_poly_range;
                         avp12ll[tidump] = avp12;
 
-                        p.poly_min = (1.0 - p.poly_rel_tol) * 0.5 * gavp12l;
-                        p.poly_max = (1.0 + p.poly_rel_tol) * 0.5 * gavp12u;
+                        p.poly_min = (1.0 - 0.5 * p.poly_rel_tol) * 0.5 * gavp12l;
+                        p.poly_max = (1.0 + 0.5 * p.poly_rel_tol) * 0.5 * gavp12u;
                     }
 
                     gdsloc += (dsloc - dslocl[tidump]) / p.n_tune_poly_range;
