@@ -19,6 +19,5 @@ z smearing steps       10,10,10,10,10,10
 traj/surface           0
 traj/polyakov dump     0
 traj/sts polyakov dump 0
-traj/znr polyakov dump 10
 
 
