@@ -42,7 +42,6 @@ struct parameters {
     int n_surface;
     int n_dump_polyakov;
     int n_dump_sts_polyakov;
-    int n_dump_znr_polyakov;
 };
 
 template <int ni, int nf>
@@ -403,7 +402,7 @@ void smear_spat_field_full_log(VectorField<T> &sU, aT smear_param, int n_smear) 
                 tstap[X] = 0;
                 tznstap[X] = 0;
                 int zn = 0;
-                sU[e_t][X] = log(ZN_reduce(sU[e_t][X], zn)).expand();
+                sU[e_t][X] = ZN_reduce(sU[e_t][X], zn);
                 znsUt[X] = zn;
             }
             foralldir (d) {
@@ -419,9 +418,69 @@ void smear_spat_field_full_log(VectorField<T> &sU, aT smear_param, int n_smear) 
                 }
             }
             onsites (ALL) {
-                aT tznphase = round(coeff * (aT)(znsUt[X] + tznstap[X])) * 2.0 * M_PI / (aT)NCOLOR;
+                //aT tznphase = round(coeff * (aT)(znsUt[X] + tznstap[X])) * 2.0 * M_PI / (aT)NCOLOR;
+                aT tznphase = (aT)znsUt[X] * 2.0 * M_PI / (aT)NCOLOR;
                 Complex<aT> znrot(cos(tznphase), sin(tznphase));
-                sU[e_t][X] = chexp(coeff * (tstap[X] + sU[e_t][X])) * znrot;
+                sU[e_t][X] =
+                    chexp((tstap[X] + sU[e_t][X]).project_to_algebra_scaled(coeff).expand()) *
+                    znrot;
+            }
+        }
+    }
+}
+
+template <typename T, typename aT>
+void smear_spat_field_full_alldir_ZNr(VectorField<T> &sU, aT smear_param, int n_smear) {
+    if (n_smear > 0) {
+        aT coeff = smear_param / (1.0 + (2.0 * smear_param * (NDIM - 1)));
+        aT dcoeff = coeff;
+        Field<T> lstap;
+        VectorField<T> ttstap;
+        Field<int> znsUt;
+        for (int ism = 0; ism < n_smear; ++ism) {
+            onsites (ALL) {
+                ttstap[e_t][X] = 0;
+                int zn = 0;
+                sU[e_t][X] = ZN_reduce(sU[e_t][X], zn);
+                znsUt[X] = zn;
+            }
+            foralldir (d1) {
+                if (d1 < e_t) {
+                    onsites (ALL) {
+                        ttstap[e_t][X] += sU[d1][X] * sU[e_t][X + d1] * sU[d1][X].dagger();
+                        lstap[X] = sU[d1][X].dagger() * sU[e_t][X] * sU[d1][X];
+                    }
+                    onsites (ALL) {
+                        ttstap[e_t][X] += lstap[X - d1];
+                        ttstap[d1][X] = sU[e_t][X] * sU[d1][X] * sU[e_t][X + d1].dagger() +
+                                        sU[e_t][X].dagger() * sU[d1][X] * sU[e_t][X + d1];
+                    }
+                    foralldir (d2) {
+                        if (d2 != d1 && d2 < e_t) {
+                            onsites (ALL) {
+                                ttstap[d1][X] +=
+                                    sU[d2][X] * sU[d1][X + d2] * sU[d2][X + d1].dagger();
+                                lstap[X] = sU[d2][X].dagger() * sU[d1][X] * sU[d2][X + d1];
+                            }
+                            onsites (ALL) {
+                                ttstap[d1][X] += lstap[X - d2];
+                            }
+                        }
+                    }
+                }
+            }
+            foralldir (d1) {
+                onsites (ALL) {
+                    sU[d1][X] = chexp((ttstap[d1][X] * sU[d1][X].dagger())
+                                        .project_to_algebra_scaled(coeff)
+                                        .expand()) *
+                                sU[d1][X];
+                }
+            }
+            onsites (ALL) {
+                aT tznphase = (aT)znsUt[X] * 2.0 * M_PI / (aT)NCOLOR;
+                Complex<aT> znrot(cos(tznphase), sin(tznphase));
+                sU[e_t][X] *= znrot;
             }
         }
     }
@@ -592,7 +651,7 @@ std::vector<pT> measure_polyakov_profile(const GaugeField<group> &U, Direction d
     ReductionVector<pT> p(lattice.size(dz), 0);
     p.delayed(true).allreduce(false);
     onsites(ALL) if (X.coordinate(e_t) == 0) {
-        p[X.coordinate(dz)] += pl[X] / area;
+        p[X.coordinate(dz)] += pl[X] / (pT)area;
     }
 
     p.reduce();
@@ -659,7 +718,7 @@ void spectraldensity_surface(std::vector<sT> &surf, int size_x, int size_y,
 
         int k = x * x + y * y;
         if (k < pow_size) {
-            npow[k] += buf[i].squarenorm() / (area * area);
+            npow[k] += buf[i].squarenorm() / ((double)area * (double)area);
             hits[k]++;
         }
     }
@@ -1001,7 +1060,7 @@ bool measure_interface_spectrum(const Field<sT> &smS, Direction dir_z, aT surfac
                 spectraldensity_surface(surf2, size_x, size_y, npow, hits);
             }
         } else {
-            int area = size_x * size_y;
+            long area = size_x * size_y;
             for (int i = 0; i < area; ++i) {
                 int x = i % size_x;
                 int y = i / size_x;
@@ -1327,7 +1386,6 @@ int main(int argc, char **argv) {
         p.n_surface = par.get("traj/surface");
         p.n_dump_polyakov = par.get("traj/polyakov dump");
         p.n_dump_sts_polyakov = par.get("traj/sts polyakov dump");
-        p.n_dump_znr_polyakov = par.get("traj/znr polyakov dump");
         if (p.n_smear.size() != p.z_smear.size()) {
             hila::out0 << "Error in input file: number of values in 'smearing steps' != 'z "
                           "smearing steps'\n";
@@ -1524,34 +1582,6 @@ int main(int argc, char **argv) {
                     for (int tslice = 0; tslice < lattice.size(e_t); ++tslice) {
                         std::string dump_file =
                             string_format("poly_dump_stout-type_smear_%04d_%03d_nsm%04d", icdump, tslice, n_smear);
-                        pl.config_slice_write(dump_file, {-1, -1, -1, tslice});
-                    }
-                }
-            }
-            if (p.n_dump_znr_polyakov && (trajectory + 1) % p.n_dump_znr_polyakov == 0) {
-                // stout type smearing test
-                VectorField<mygroup> smS00;
-                smS00 = U;
-                measure_polyakov_field_full(U[e_t], smS00[e_t]);
-
-                int n_smear = 0;
-                for (int ism = 0; ism < p.n_smear.size(); ++ism) {
-                    int smear = p.n_smear[ism];
-                    smear_spat_field_full_log(smS00, p.smear_coeff, smear - n_smear);
-                    if (smear > n_smear) {
-                        n_smear = smear;
-                    }
-
-                    Field<float> pl;
-                    onsites (ALL) {
-                        pl[X] = real(trace(smS00[e_t][X]));
-                    }
-
-                    int icdump = (trajectory + 1) / p.n_dump_znr_polyakov;
-                    for (int tslice = 0; tslice < lattice.size(e_t); ++tslice) {
-                        std::string dump_file =
-                            string_format("poly_dump_zn_log-type_smear_%04d_%03d_nsm%04d", icdump,
-                                          tslice, n_smear);
                         pl.config_slice_write(dump_file, {-1, -1, -1, tslice});
                     }
                 }

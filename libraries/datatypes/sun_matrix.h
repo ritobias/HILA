@@ -401,8 +401,6 @@ class Algebra<SU<N, T>> : public Matrix_t<N * N - 1, 1, T, Algebra<SU<N, T>>> {
     //
     // Define \lambda's so that diagonals come first
 
-    /// expand algebra to matrix rep - antihermitean
-
     static void generator_list(Alg_gen<N, T>(out_only &gen_list)[N_a]) {
         // set gen_list to contain N_a=N^2-1 generators of su(N) as sparse matrices
         // (sparse -> list of non-zero elements (ind1,ind2,val))
@@ -465,6 +463,7 @@ class Algebra<SU<N, T>> : public Matrix_t<N * N - 1, 1, T, Algebra<SU<N, T>>> {
         generator_product_list(gen_list, gen_prod_list);
     }
 
+    /// expand algebra to matrix rep - antihermitean
     SU<N, T> expand() const {
         SU<N, T> m;
 
