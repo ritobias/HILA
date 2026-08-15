@@ -1415,9 +1415,9 @@ int main(int argc, char **argv) {
     if (!hila::is_rng_seeded())
         hila::seed_random(seed);
 
-    if (start_traj >= 0 && p.deltab != 0) {
+    if (start_traj >= -1 && p.deltab != 0) {
         p.deltab = 0;
-        hila::out0 << "setting deltab = 0 (trajectory beyond thermalization)" << "\n";
+        hila::out0 << "setting delta beta = 0 (trajectory beyond thermalization)" << "\n";
     }
 
     hila::timer update_timer("Updates");
@@ -1484,10 +1484,10 @@ int main(int argc, char **argv) {
 
         measure_stuff(U, p);
 
-        if(trajectory == 0) {
+        if(trajectory == -1) {
             if(p.deltab!=0) {
                 p.deltab = 0;
-                hila::out0 << "setting deltab=0 (end of thermalization reached)" << "\n";
+                hila::out0 << "setting delta beta=0 (end of thermalization reached)" << "\n";
             }
             if (p.n_tune_poly_range > 0) {
                 p_now = measure_polyakov(U).real();
