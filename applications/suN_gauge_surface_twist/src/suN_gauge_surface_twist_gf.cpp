@@ -1381,10 +1381,10 @@ void measure_interface_ft(const Field<Complex<T>> &ismS, Direction dz, int bds_s
             for (int x = 0; x < size_x; ++x) {
                 ftn = 0;
                 for (int z = 0; z < size_z; z++) {
-                    ftn += 2.0 * lS[x + size_x * z] * ft_basis[z];
+                    ftn += (sT)2.0 * lS[x + size_x * z] * ft_basis[z];
                 }
 
-                surf[x + y * size_x] = (sT)arg(ftn) * (sT)size_z / M_PI + (sT)(size_z + 1) / 2;
+                surf[x + y * size_x] = (sT)arg(ftn) * (sT)size_z / M_PI + (sT)size_z / 2;
             }
         }
     }
