@@ -726,7 +726,7 @@ void spectraldensity_surface(std::vector<sT> &surf, int size_x, int size_y,
 
 
 template <typename sT, typename aT>
-bool measure_interface_ft(const Field<sT> &smS, Direction dz, std::vector<aT> &surf, out_only int &size_x, out_only int &size_y) {
+sT measure_mean_interface_ft(const Field<sT> &smS, Direction dz, std::vector<aT> &surf, out_only int &size_x, out_only int &size_y) {
 
     Direction dx, dy;
     foralldir(td) if (td != dz) {
@@ -792,64 +792,8 @@ bool measure_interface_ft(const Field<sT> &smS, Direction dz, std::vector<aT> &s
         }
     }
     meanz /= area;
-    hila::out0 << string_format("ft z_mid=% 0.4f\n", meanz);
-    return true;
+    return meanz;
 }
-
-
-template <typename sT>
-bool measure_interface_spectrum_ft(const Field<sT> &smS, Direction dir_z, int nsm,
-                                int64_t idump, parameters &p, bool first_pow) {
-    std::vector<sT> surf;
-    int size_x, size_y;
-    hila::out0 << "SMEARFT" << nsm << " ";
-    bool ok = measure_interface_ft(smS, dir_z, surf, size_x, size_y);
-
-    if (hila::myrank() == 0) {
-        constexpr int pow_size = 200;
-        std::vector<double> npow(pow_size, 0);
-        std::vector<int> hits(pow_size, 0);
-        if (ok) {
-            spectraldensity_surface(surf, size_x, size_y, npow, hits);
-        } else {
-            int area = size_x * size_y;
-            for (int i = 0; i < area; ++i) {
-                int x = i % size_x;
-                int y = i / size_x;
-                x = (x <= size_x / 2) ? x : (size_x - x);
-                y = (y <= size_y / 2) ? y : (size_y - y);
-
-                int k = x * x + y * y;
-                if (k < pow_size) {
-                    hits[k]++;
-                }
-            }
-        }
-        
-        bwrite_to_file_header<3, 2 + pow_size> psh;
-        psh.ihead[0] = NCOLOR;
-        psh.ihead[1] = nsm;
-        psh.ihead[2] = pow_size;
-        psh.fhead[0] = p.beta;
-        psh.fhead[1] = p.smear_coeff;
-        int64_t npowmeas = 0;
-        std::vector<double> powspec(pow_size);
-        for (int ipow = 0; ipow < pow_size; ++ipow) {
-            if (hits[ipow] > 0) {
-                psh.fhead[2 + npowmeas] = ipow;
-                powspec[npowmeas] = npow[ipow] / hits[ipow];
-                ++npowmeas;
-            }
-        }
-        powspec.resize(npowmeas);
-        psh.fname = string_format("profile_ft_nsm%04d", nsm);
-        bwrite_to_file(psh, powspec, idump, first_pow);
-
-    }
-
-    return true;
-}
-
 
 template <typename sT, typename pT, typename aT>
 bool measure_interface(const Field<sT> &smS, Direction dz, pT surface_level, std::vector<aT> &surf1,
@@ -1096,6 +1040,113 @@ bool measure_interface_spectrum(const Field<sT> &smS, Direction dir_z, aT surfac
     return true;
 }
 
+
+template <typename sT, typename aT>
+bool measure_interface_ft(const Field<sT> &smS, Direction dz, sT surface_level, std::vector<aT> &surf1,
+                          std::vector<aT> &surf2, out_only int &size_x, out_only int &size_y) {
+    Direction dx, dy;
+    foralldir (td)
+        if (td != dz) {
+            dx = td;
+            break;
+        }
+    foralldir (td)
+        if (td != dz && td != dx) {
+            dy = td;
+            break;
+        }
+
+    size_x = lattice.size(dx);
+    size_y = lattice.size(dy);
+    int size_z = lattice.size(dz);
+    int size_zr = size_z / 2;
+
+    int area = size_x * size_y;
+
+    static std::vector<Complex<sT>> ft_basis[2];
+    static bool first = true;
+
+    if (first) {
+        first = false;
+        for(int i = 0; i < 2; ++i) {    
+            ft_basis[i].resize(size_zr);
+            sT tsign = -(sT)(1 - 2 * i);
+            for (int iz = 0; iz < size_zr; ++iz) {
+                sT ftarg = M_PI * (sT)iz / (sT)size_zr;
+                ft_basis[i][iz].polar(tsign, ftarg);
+            }
+        }
+    }
+
+
+    if (hila::myrank() == 0) {
+        surf1.resize(area);
+        surf2.resize(area);
+    }
+
+    std::vector<sT> lS;
+
+    CoordinateVector yslice;
+    foralldir (td) {
+        if (td != e_t) {
+            yslice[td] = -1;
+        } else {
+            yslice[td] = 0;
+        }
+    }
+    Complex<sT> ftn;
+    int z01 = size_zr / 2;
+    int z02 = z01 + size_zr;
+    aT meanz1 = 0, meanz2 = 0;
+    aT zsloc1 = 0, zsloc2 = 0;
+    for (int y = 0; y < size_y; ++y) {
+        yslice[dy] = y;
+        lS = smS.get_slice(yslice);
+        if (hila::myrank() == 0) {
+            for (int x = 0; x < size_x; ++x) {
+                ftn = 0;
+                for (int z = 0; z < size_zr; z++) {
+                    ftn +=
+                        (sT)2.0 * (lS[x + size_x * z_ind(z01 + z, dz)] - surface_level) * ft_basis[0][z];
+                }
+                zsloc1 = (aT)arg(ftn) * (aT)size_zr / M_PI + (aT)size_zr / 2 + (aT)z01;
+                surf1[x + y * size_x] = zsloc1;
+                meanz1 += zsloc1;
+
+                ftn = 0;
+                for (int z = 0; z < size_zr; z++) {
+                    ftn +=
+                        (sT)2.0 * (lS[x + size_x * z_ind(z02 + z, dz)] - surface_level) * ft_basis[1][z];
+                }
+                zsloc2 = (aT)arg(ftn) * (aT)size_zr / M_PI + (aT)size_zr / 2 + (aT)z02;
+                surf2[x + y * size_x] = zsloc2;
+                meanz2 += zsloc2;
+           }
+        }
+    }
+    meanz1 /= area;
+    meanz2 /= area;
+
+    hila::out0 << string_format("sloc1=% 6.2f, sloc2=% 6.2f, av. surface_level=% 4.3f\n", meanz1,
+                                meanz2, surface_level);
+
+    return true;
+}
+
+
+template <typename group>
+void translate_config(GaugeField<group> &U, Direction odir1) {
+    Field<group> tU;
+    Direction dir1 = opp_dir(odir1);
+    foralldir (dir2) {
+        onsites (ALL) {
+            tU[X] = U[dir2][X + dir1];
+        }
+        onsites (ALL) {
+            U[dir2][X] = tU[X];
+        }
+    }
+}
 
 ////////////////////////////////////////////////////////////////
 
@@ -1524,9 +1575,8 @@ int main(int argc, char **argv) {
 
                 measure_polyakov_field(U[e_t], smS);
                 int n_smear = 0;
-                if (p.n_smear.size() == 0 || p.n_smear[0] != 0) {
-                    measure_interface_spectrum_ft(smS, e_z, n_smear, idump, p, first_pow);
-                }
+                std::vector<double> surf, surf1, surf2;
+                int size_x, size_y;
                 for (int ism = 0; ism < p.n_smear.size(); ++ism) {
                     int smear = p.n_smear[ism];
                     smear_polyakov_field(smS, smear - n_smear, p.smear_coeff);
@@ -1545,8 +1595,117 @@ int main(int argc, char **argv) {
                     if(n_smear > 0) {
                         measure_interface_spectrum(tsmS, e_z, surface_level, n_smear, idump, p,
                                                 avp12, avp21, dsloc, first_pow);
+
+                        hila::out0 << "SMEARFT" << n_smear << " ";
+                        double meanz = measure_mean_interface_ft(smS, e_z, surf, size_x, size_y);
+                        hila::out0 << string_format("z_mid=% 6.2f, ", meanz);
+
+                        if (hila::myrank() == 0) {
+                            constexpr int pow_size = 200;
+                            std::vector<double> npow(pow_size, 0);
+                            std::vector<int> hits(pow_size, 0);
+                            if (meanz > 0.0 && meanz < (double)lattice.size(e_z)) {
+                                spectraldensity_surface(surf, size_x, size_y, npow, hits);
+                            } else {
+                                int area = size_x * size_y;
+                                for (int i = 0; i < area; ++i) {
+                                    int x = i % size_x;
+                                    int y = i / size_x;
+                                    x = (x <= size_x / 2) ? x : (size_x - x);
+                                    y = (y <= size_y / 2) ? y : (size_y - y);
+
+                                    int k = x * x + y * y;
+                                    if (k < pow_size) {
+                                        hits[k]++;
+                                    }
+                                }
+                            }
+
+                            bwrite_to_file_header<3, 2 + pow_size> psh;
+                            psh.ihead[0] = NCOLOR;
+                            psh.ihead[1] = n_smear;
+                            psh.ihead[2] = pow_size;
+                            psh.fhead[0] = p.beta;
+                            psh.fhead[1] = p.smear_coeff;
+                            int64_t npowmeas = 0;
+                            std::vector<double> powspec(pow_size);
+                            for (int ipow = 0; ipow < pow_size; ++ipow) {
+                                if (hits[ipow] > 0) {
+                                    psh.fhead[2 + npowmeas] = ipow;
+                                    powspec[npowmeas] = npow[ipow] / hits[ipow];
+                                    ++npowmeas;
+                                }
+                            }
+                            powspec.resize(npowmeas);
+                            psh.fname = string_format("profile_ft_nsm%04d", n_smear);
+                            bwrite_to_file(psh, powspec, idump, first_pow);
+                        }
+                        bool okift = 0;
+                        if (lattice.size(e_z) * 5 / 9 < meanz < lattice.size(e_z) * 8 / 9) {
+                            measure_interface_ft(smS, e_z, (double)surface_level, surf1, surf2, size_x,
+                                                 size_y);
+                            okift = true;
+                        }
+                        if (hila::myrank() == 0) {
+                            constexpr int pow_size = 200;
+                            std::vector<double> npow(pow_size, 0);
+                            std::vector<int> hits(pow_size, 0);
+                            bwrite_to_file_header<3, 2 + pow_size> psh;
+                            psh.ihead[0] = NCOLOR;
+                            psh.ihead[1] = n_smear;
+                            psh.ihead[2] = pow_size;
+                            psh.fhead[0] = p.beta;
+                            psh.fhead[1] = p.smear_coeff;
+                            psh.fname = string_format("profile_ft2_nsm%04d", n_smear);
+                            if(okift) {
+                                spectraldensity_surface(surf1, size_x, size_y, npow, hits);
+                                spectraldensity_surface(surf2, size_x, size_y, npow, hits);
+                            } else {
+                                long area = size_x * size_y;
+                                for (int i = 0; i < area; ++i) {
+                                    int x = i % size_x;
+                                    int y = i / size_x;
+                                    x = (x <= size_x / 2) ? x : (size_x - x);
+                                    y = (y <= size_y / 2) ? y : (size_y - y);
+
+                                    int k = x * x + y * y;
+                                    if (k < pow_size) {
+                                        hits[k]++;
+                                    }
+                                }
+                            }
+                            int64_t npowmeas = 0;
+                            std::vector<double> powspec(pow_size, 0.0);
+                            for (int ipow = 0; ipow < pow_size; ++ipow) {
+                                if (hits[ipow] > 0) {
+                                    psh.fhead[2 + npowmeas] = ipow;
+                                    powspec[npowmeas] = npow[ipow] / hits[ipow];
+                                    ++npowmeas;
+                                }
+                            }
+                            powspec.resize(npowmeas);
+                            bwrite_to_file(psh, powspec, idump, first_pow);
+                        }
+                    
+                        if(ism == p.n_smear.size() - 1) {
+                            double meanz0 = (double)lattice.size(e_z) * 3.0 / 4.0;
+                            int dmeanz= (int)(meanz0 - meanz);
+                            if(dmeanz != 0) {
+                                hila::out0 << "CENTERING in " << e_z << "-direction, shifting by " << dmeanz << " sites\n";
+                                while (dmeanz > 0) {
+                                    translate_config(U, e_z);
+                                    --dmeanz;
+                                    meanz += 1.0;
+                                }
+                                while (dmeanz < 0) {
+                                    translate_config(U, opp_dir(e_z));
+                                    ++dmeanz;
+                                    meanz -= 1.0;
+                                }
+                                hila::out0 << string_format(" --> z_mid=% 0.4f\n", meanz);
+                            }
+                        }
                     }
-                    measure_interface_spectrum_ft(smS, e_z, n_smear, idump, p, first_pow);
 
                     if (p.n_dump_polyakov && (trajectory + 1) % p.n_dump_polyakov == 0) {
                         Field<float> pl;
