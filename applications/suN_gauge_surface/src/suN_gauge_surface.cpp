@@ -792,6 +792,7 @@ sT measure_mean_interface_ft(const Field<sT> &smS, Direction dz, std::vector<aT>
         }
     }
     meanz /= area;
+    hila::broadcast(meanz);
     return meanz;
 }
 
@@ -1307,7 +1308,6 @@ double update_once_with_range(GaugeField<group> &U, const parameters &p, double 
         update_parity_dir(U, p, par, Direction(tdir), relax);
         if(tdir == NDIM - 1) {
             double p_new = measure_polyakov(U).real();
-
             bool acc_update;
             if (p.polyakov_pot == poly_limit::PARABOLIC) {
                 acc_update = accept_polyakov_pot(p, p_now, p_new);
@@ -1476,7 +1476,7 @@ int main(int argc, char **argv) {
 
     double p_prev = (double)NCOLOR;
     double p_now = measure_polyakov(U).real();
-
+    hila::broadcast(p_now);
     double avp12 = 0, avp21 = 0;
     double dsloc = 0;
 
@@ -1542,6 +1542,7 @@ int main(int argc, char **argv) {
             }
             if (p.n_tune_poly_range > 0) {
                 p_now = measure_polyakov(U).real();
+                hila::broadcast(p_now);
                 avp12 = 0;
                 avp21 = 0;
                 dsloc = 0;
