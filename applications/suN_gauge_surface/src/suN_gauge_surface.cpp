@@ -1514,7 +1514,7 @@ int main(int argc, char **argv) {
         update_timer.start();
 
         double acc = 0;
-        if (p.polyakov_pot != poly_limit::OFF) {
+        if (p.deltab == 0 && p.polyakov_pot != poly_limit::OFF) {
             acc += trajectory_with_range(U, p, p_now, p_prev);
         } else {
             do_trajectory(U, p);
@@ -1529,7 +1529,7 @@ int main(int argc, char **argv) {
 
         hila::out0 << "Measure_start " << trajectory << '\n';
 
-        if (p.polyakov_pot != poly_limit::OFF) {
+        if (p.deltab == 0 && p.polyakov_pot != poly_limit::OFF) {
             hila::out0 << "ACCP " << acc << '\n';
         }
 
