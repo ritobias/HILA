@@ -173,7 +173,7 @@ void move_filtered_p(const Field<T> (&S)[2], const Field<pT> &bcmsid, const Dire
         S[0].start_gather(-d, par);
     }
     onsites(par) {
-        if (bcmsid[X] <= p.bcms) {
+        if (bcmsid[X] < p.bcms) {
             Sd[X] = S[1][X + d];
         } else {
             Sd[X] = S[0][X + d];
@@ -181,7 +181,7 @@ void move_filtered_p(const Field<T> (&S)[2], const Field<pT> &bcmsid, const Dire
     }
     if (both_dirs) {
         onsites(par) {
-            if (bcmsid[X] <= p.bcms) {
+            if (bcmsid[X] < p.bcms) {
                 Sd[X] += S[1][X - d];
             } else {
                 Sd[X] += S[0][X - d];
@@ -223,10 +223,10 @@ void move_filtered_k(const Field<T> (&S)[2], const Field<pT> &bcmsid, const Dire
             SK[0].start_gather(-d);
         }
         onsites(ALL) {
-            if (bcmsid[X] <= p.l) {
+            if (bcmsid[X] < p.l) {
                 tSK[X] = SK[1][X + d];
             } else {
-                if (bcmsid[X] <= p.lc) {
+                if (bcmsid[X] < p.lc) {
                     tSK[X] = p.alpha * SK[1][X + d] + (1.0 - p.alpha) * SK[0][X + d];
                 } else {
                     tSK[X] = SK[0][X + d];
@@ -235,10 +235,10 @@ void move_filtered_k(const Field<T> (&S)[2], const Field<pT> &bcmsid, const Dire
         }
         if(both_dirs) {
             onsites(ALL) {
-                if (bcmsid[X] <= p.l) {
+                if (bcmsid[X] < p.l) {
                     tSK[X] += SK[1][X - d];
                 } else {
-                    if (bcmsid[X] <= p.lc) {
+                    if (bcmsid[X] < p.lc) {
                         tSK[X] += p.alpha * SK[1][X - d] + (1.0 - p.alpha) * SK[0][X - d];
                     } else {
                         tSK[X] += SK[0][X - d];
@@ -456,7 +456,7 @@ double measure_ds_dalpha(const Field<T> (&S)[2], const Field<pT> &bcmsid, const 
         }
         tS.FFT(fftdirs, SK[0]);
         onsites(ALL) {
-            if (bcmsid[X] > p.l && bcmsid[X] <= p.lc) {
+            if (bcmsid[X] >= p.l && bcmsid[X] < p.lc) {
                 tSK[X] = SK[1][X + d] - SK[0][X + d];
             } else {
                 tSK[X] = 0;
