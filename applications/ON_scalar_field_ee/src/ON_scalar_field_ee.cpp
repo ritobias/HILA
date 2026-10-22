@@ -284,9 +284,9 @@ void move_filtered(const Field<T> (&S)[2], const Field<pT> &bcmsid, const Direct
                    const Parity &par, bool both_dirs, out_only Field<T> &Sd, const parameters &p) {
     if (p.s > 1) {
 #if MOMENTUMSPACE==1
-            move_filtered_k(S, bcmsid, d, par, both_dirs, Sd, p);
+        move_filtered_k(S, bcmsid, d, par, both_dirs, Sd, p);
 #else
-            move_filtered_p(S, bcmsid, d, par, both_dirs, Sd, p);
+        move_filtered_p(S, bcmsid, d, par, both_dirs, Sd, p);
 #endif
     } else {
         if (both_dirs) {
@@ -1129,15 +1129,19 @@ int main(int argc, char **argv) {
         bcmsid[X] = sknorm;
     }
 #else
-    onsites(ALL) {
-        auto c = X.coordinates();
-        bcmsid[X] = 0;
-        int cfac = 1;
-        for (int d = 1; d < NDIM - 1; ++d) {
-            bcmsid[X] += c[d] * cfac;
-            cfac *= lattice.size(d);
+    {
+        auto lsizes = lattice.sizes();
+        onsites(ALL) {
+            auto c = X.coordinates();
+            
+            bcmsid[X] = 0;
+            int cfac = 1;
+            for (int d = 1; d < NDIM - 1; ++d) {
+                bcmsid[X] += c[d] * cfac;
+                cfac *= lsizes[d];
+            }
+            bcmsid[X] += c[0] * cfac;
         }
-        bcmsid[X] += c[0] * cfac;
     }
 #endif
 
