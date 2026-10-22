@@ -1129,19 +1129,16 @@ int main(int argc, char **argv) {
         bcmsid[X] = sknorm;
     }
 #else
-    {
+    onsites(ALL) {
+        auto c = X.coordinates();
         auto lsizes = lattice.size();
-        onsites(ALL) {
-            auto c = X.coordinates();
-            
-            bcmsid[X] = 0;
-            int cfac = 1;
-            for (int d = 1; d < NDIM - 1; ++d) {
-                bcmsid[X] += c[d] * cfac;
-                cfac *= lsizes[d];
-            }
-            bcmsid[X] += c[0] * cfac;
+        bcmsid[X] = 0;
+        int cfac = 1;
+        for (int d = 1; d < NDIM - 1; ++d) {
+            bcmsid[X] += c[d] * cfac;
+            cfac *= lsizes[d];
         }
+        bcmsid[X] += c[0] * cfac;
     }
 #endif
 
