@@ -14,6 +14,8 @@ HILA_DIR := ../..
 NCOL := 4
 # Number of dimensions
 NDIM := 4
+# Use spherical momentum shell as entangling region? (1=yes (default), 0=no (i.e. use position space slab))
+MOMENTUMSPACE := 1
 
 ifndef ARCH
 ARCH := vanilla
@@ -29,7 +31,7 @@ include $(HILA_DIR)/libraries/main.mk
 #HILAPP_OPTS += -comment-pragmas
 HILAPP_OPTS += -check-init
 
-APP_OPTS += -DNDIM=${NDIM} -DNCOLOR=${NCOL} -DGENGATHER
+APP_OPTS += -DNDIM=${NDIM} -DNCOLOR=${NCOL} -DMOMENTUMSPACE=${MOMENTUMSPACE} -DGENGATHER
 
 ifdef SUN_OVERRELAX_dFJ
 APP_OPTS += -DSUN_OVERRELAX_dFJ
@@ -38,10 +40,17 @@ endif
 # With multiple targets we want to use "make target", not "make build/target".
 # This is needed to carry the dependencies to build-subdir
 
-ON_scalar_field_ee: build/O${NCOL}_scalar_field_ee_d${NDIM}_${ARCH} ; @:
+SUFFIX := _d${NDIM}_${ARCH}
+ifneq ($(MOMENTUMSPACE), 1)
+	SUFFIX := ${SUFFIX}_p
+else
+	SUFFIX := ${SUFFIX}_k
+endif
+
+ON_scalar_field_ee: build/O${NCOL}_scalar_field_ee${SUFFIX} ; @:
 
 # Now the linking step for each target executable
-build/O${NCOL}_scalar_field_ee_d${NDIM}_${ARCH}: Makefile build/ON_scalar_field_ee.o $(HILA_OBJECTS) $(HEADERS)
+build/O${NCOL}_scalar_field_ee${SUFFIX}: Makefile build/ON_scalar_field_ee.o $(HILA_OBJECTS) $(HEADERS)
 	$(LD) -o $@ build/ON_scalar_field_ee.o $(HILA_OBJECTS) $(LDFLAGS) $(LDLIBS) 
 
 

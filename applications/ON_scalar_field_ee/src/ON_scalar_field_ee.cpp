@@ -11,6 +11,13 @@ using ftype = double;
 using fT = Vector<NCOLOR, ftype>;
 using fTf = Vector<NCOLOR, float>;
 
+#ifndef MOMENTUMSPACE
+#define MOMENTUMSPACE 1
+using bcmstype = ftype;
+#else
+using bcmstype = int;
+#endif
+
 // define a struct to hold the input parameters: this
 // makes it simpler to pass the values around
 struct parameters {
@@ -18,11 +25,12 @@ struct parameters {
     ftype lambda;       // quartic coupling (lattice definition)
     fT source;          // source terms
     int s;              // number of replicas
-    ftype l;            // momentum space entangling region slab width l
-    ftype lc;           // momentum space entangling region slab width lc
-    ftype alpha;        // interpolation parameter between l and lc
-    ftype dalpha;
-    ftype bcms;
+    ftype l;            // momentum (position) space entangling region "shperical shell radius" ("slab width") l
+    ftype lc;           // momentum (position) space entangling region "shperical shell radius" ("slab width") lc
+    int min_bcms;
+    int max_bcms;
+    ftype alpha;        // interpolation parameter to interpolate between l and lc
+    ftype dalpha;       // interpolation direction and range for alpha
     int n_traj;         // number of trajectories to generate
     int n_therm;        // number of thermalization trajectories (counts only accepted traj.)
     int n_heatbath;     // number of heat-bath sweeps per "trajectory"
@@ -61,6 +69,8 @@ void bwrite_to_file(std::string fname, const std::vector<T> &dat, parameters &p,
                 // sizeof(T),
                 // sizeof(atype),
                 // p.s,
+                // p.min_bcms,
+                // p.max_bcms,
                 // p.kappa,
                 // p.lambda,
                 // p.source(0), ..., p.source(NCOLOR -1),
@@ -69,9 +79,9 @@ void bwrite_to_file(std::string fname, const std::vector<T> &dat, parameters &p,
                 // p.alpha,
                 // p.dalpha
                 //
-                int64_t *ibuff = (int64_t *)memalloc((NDIM + 7) * sizeof(int64_t));
-                ifile.read((char *)ibuff, (NDIM + 7) * sizeof(int64_t));
-                ofile.write((char *)ibuff, (NDIM + 7) * sizeof(int64_t));
+                int64_t *ibuff = (int64_t *)memalloc((NDIM + 9) * sizeof(int64_t));
+                ifile.read((char *)ibuff, (NDIM + 9) * sizeof(int64_t));
+                ofile.write((char *)ibuff, (NDIM + 9) * sizeof(int64_t));
 
                 double *fbuff = (double *)memalloc((NCOLOR + 6) * sizeof(double));
                 ifile.read((char *)fbuff, (NCOLOR + 6) * sizeof(double));
@@ -107,6 +117,8 @@ void bwrite_to_file(std::string fname, const std::vector<T> &dat, parameters &p,
                 // sizeof(T),
                 // sizeof(atype),
                 // p.s,
+                // p.min_bcms,
+                // p.max_bcms,
                 // p.kappa,
                 // p.lambda,
                 // p.source(0), ..., p.source(NCOLOR -1),
@@ -116,7 +128,7 @@ void bwrite_to_file(std::string fname, const std::vector<T> &dat, parameters &p,
                 // p.dalpha
                 //
                 ofile.open(fname, std::ios::out | std::ios::binary);
-                int64_t *ibuff = (int64_t *)memalloc((NDIM + 7) * sizeof(int64_t));
+                int64_t *ibuff = (int64_t *)memalloc((NDIM + 9) * sizeof(int64_t));
                 ibuff[0] = NCOLOR;
                 ibuff[1] = NDIM;
                 foralldir(d) {
@@ -127,7 +139,9 @@ void bwrite_to_file(std::string fname, const std::vector<T> &dat, parameters &p,
                 ibuff[NDIM + 4] = sizeof(T);
                 ibuff[NDIM + 5] = sizeof(atype);
                 ibuff[NDIM + 6] = p.s;
-                ofile.write((char *)ibuff, (NDIM + 7) * sizeof(int64_t));
+                ibuff[NDIM + 7] = p.min_bcms;
+                ibuff[NDIM + 8] = p.max_bcms;
+                ofile.write((char *)ibuff, (NDIM + 9) * sizeof(int64_t));
 
                 double *fbuff = (double *)memalloc((NCOLOR + 6) * sizeof(double));
                 fbuff[0] = p.kappa;
@@ -147,7 +161,6 @@ void bwrite_to_file(std::string fname, const std::vector<T> &dat, parameters &p,
                 free(ibuff);
             }
         }
-
 
         ofile.open(fname, std::ios::out | std::ios_base::app | std::ios::binary);
         int64_t tidump = (int64_t)idump;
@@ -173,18 +186,26 @@ void move_filtered_p(const Field<T> (&S)[2], const Field<pT> &bcmsid, const Dire
         S[0].start_gather(-d, par);
     }
     onsites(par) {
-        if (bcmsid[X] < p.bcms) {
+        if (bcmsid[X] < p.min_bcms) {
             Sd[X] = S[1][X + d];
         } else {
-            Sd[X] = S[0][X + d];
+            if (bcmsid[X] < p.max_bcms) {
+                Sd[X] = p.alpha * S[1][X + d] + (1.0 - p.alpha) * S[0][X + d];
+            } else {
+                Sd[X] = S[0][X + d];
+            }
         }
     }
     if (both_dirs) {
         onsites(par) {
-            if (bcmsid[X] < p.bcms) {
+            if (bcmsid[X] < p.min_bcms) {
                 Sd[X] += S[1][X - d];
             } else {
-                Sd[X] += S[0][X - d];
+                if (bcmsid[X] < p.max_bcms) {
+                    Sd[X] += p.alpha * S[1][X - d] + (1.0 - p.alpha) * S[0][X - d];
+                } else {
+                    Sd[X] += S[0][X - d];
+                }
             }
         }
     }
@@ -262,7 +283,11 @@ template <typename T, typename pT, typename atype = hila::arithmetic_type<T>>
 void move_filtered(const Field<T> (&S)[2], const Field<pT> &bcmsid, const Direction &d,
                    const Parity &par, bool both_dirs, out_only Field<T> &Sd, const parameters &p) {
     if (p.s > 1) {
-        move_filtered_k(S, bcmsid, d, par, both_dirs, Sd, p);
+#if MOMENTUMSPACE==1
+            move_filtered_k(S, bcmsid, d, par, both_dirs, Sd, p);
+#else
+            move_filtered_p(S, bcmsid, d, par, both_dirs, Sd, p);
+#endif
     } else {
         if (both_dirs) {
             S[0].start_gather(-d, par);
@@ -425,7 +450,32 @@ double measure_s(const Field<T> (&S)[2], const Field<pT> &bcmsid, const paramete
 }
 
 template <typename T, typename pT, typename atype = hila::arithmetic_type<T>>
-double measure_ds_dalpha(const Field<T> (&S)[2], const Field<pT> &bcmsid, const parameters &p) {
+double measure_ds_dalpha_p(const Field<T> (&S)[2], const Field<pT> &bcmsid, const parameters &p) {
+
+    Reduction<double> ds = 0;
+    ds.allreduce(false).delayed(true);
+    Field<T> Sd;
+
+    // hopping terms in direction d
+    Direction d = Direction(NDIM - 1);
+
+    onsites(ALL) {
+        if (bcmsid[X] >= p.min_bcms && bcmsid[X] < p.max_bcms) {
+            Sd[X] = S[1][X + d] - S[0][X + d];
+        } else {
+            Sd[X] = 0;
+        }
+    }
+
+    onsites(ALL) {
+        ds += -p.kappa * S[0][X].dot(Sd[X]);
+    }
+
+    return ds.value();
+}
+
+template <typename T, typename pT, typename atype = hila::arithmetic_type<T>>
+double measure_ds_dalpha_k(const Field<T> (&S)[2], const Field<pT> &bcmsid, const parameters &p) {
     // define direction in which Fourier transform should be taken
     CoordinateVector fftdirs;
     foralldir(d) if (d < NDIM - 1) fftdirs[d] = 1;
@@ -477,6 +527,15 @@ double measure_ds_dalpha(const Field<T> (&S)[2], const Field<pT> &bcmsid, const 
     }
 
     return ds.value();
+}
+
+template <typename T, typename pT, typename atype = hila::arithmetic_type<T>>
+double measure_ds_dalpha(const Field<T> (&S)[2], const Field<pT> &bcmsid, const parameters &p) {
+    #if MOMENTUMSPACE==1
+        return measure_ds_dalpha_k(S, bcmsid, p);
+    #else
+        return measure_ds_dalpha_p(S, bcmsid, p);
+    #endif
 }
 
 template <typename T, typename pT, typename atype = hila::arithmetic_type<T>>
@@ -948,6 +1007,12 @@ CoordinateVector bcms_coordinates(bT bcms, const Field<bT> &bcmsid) {
     return cres;
 }
 
+int bcms_from_l(ftype tl) {
+    // comptute spatial volume (in units of sites) of slab-shaped entangling reagion as function of
+    // slab width tl
+    return (int)((tl * ((ftype)1.0 + fp<ftype>::epsilon)) * (lattice.volume() / (lattice.size(NDIM - 1) * lattice.size(0))));
+}
+
 
 int main(int argc, char **argv) {
 
@@ -986,14 +1051,13 @@ int main(int argc, char **argv) {
     // number of replicas
     p.s = par.get("replica number");
     // momentum space entangling region (sphere) radius for alpha=0
-    p.l = par.get("momentum scale l");
+    p.l = par.get("entangling region l");
     // momentum space entangling region (sphere) radius for alpha=1
-    p.lc = par.get("momentum scale lc");
+    p.lc = par.get("entangling region lc");
     // interpolation parameter
     p.alpha = par.get("alpha");
-    // interpolation parameter
+    // interpolation direction and range: -1 -> alpha=1, 0.5 -> alpha=0.5, 1 -> alpha=0
     p.dalpha = par.get("dalpha");
-    p.bcms = -1;
     // number of trajectories
     p.n_traj = par.get("number of trajectories");
     // number of heat-bath (HB) sweeps per trajectory
@@ -1035,6 +1099,17 @@ int main(int argc, char **argv) {
     // set up the lattice
     lattice.setup(lsize);
 
+#if MOMENTUMSPACE == 1
+    hila::out0 << "Using momentum space entangling region.\n";
+    p.min_bcms = 0;
+    p.max_bcms = 0;
+#else
+    hila::out0 << "Using position space entangling region.\n";
+    p.min_bcms = bcms_from_l(p.l);
+    p.max_bcms = bcms_from_l(p.lc);
+    hila::out0 << "p.min_bcms=" << p.min_bcms << ", p.max_bcms=" << p.max_bcms << "\n";
+#endif
+
     // We need random number here
     hila::seed_random(seed);
 
@@ -1043,6 +1118,7 @@ int main(int argc, char **argv) {
     Field<ftype> bcmsid = 0;
     bcmsid.set_nn_topo(1); // full e_t-periodicity (doesn't really matter, thought, since bcmsid is
                            // the same on all time slices)
+#if MOMENTUMSPACE==1
     onsites(ALL) {
         auto k = X.coordinates().convert_to_k();
         ftype sknorm = 0;
@@ -1052,6 +1128,18 @@ int main(int argc, char **argv) {
         sknorm = sqrt(sknorm);
         bcmsid[X] = sknorm;
     }
+#else
+    onsites(ALL) {
+        auto c = X.coordinates();
+        bcmsid[X] = 0;
+        int cfac = 1;
+        for (int d = 1; d < NDIM - 1; ++d) {
+            bcmsid[X] += c[d] * cfac;
+            cfac *= lattice.size(d);
+        }
+        bcmsid[X] += c[0] * cfac;
+    }
+#endif
 
     std::string output_fname = string_format("O%d", NCOLOR);
     output_fname += string_format("_d%d", NDIM);

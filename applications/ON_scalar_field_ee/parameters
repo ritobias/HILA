@@ -1,18 +1,18 @@
 # This is a parameter file for ON_scalar_field_ee
 
-lattice size           64,128
-kappa                  0.48367003
-lambda                 0.0087726262
-source terms           0
+lattice size           36,18,10
+kappa                  1.2
+lambda                 0.5
+source terms           0,0,0,0
 replica number         2
-momentum scale l       0.3
-momentum scale lc      0.4
+entangling region l    17.45
+entangling region lc   17.55
 alpha                  0.5
 dalpha                 0.5
 number of trajectories 10000
 heatbath updates       100
 number of hb hits      10
-thermalization trajs   500
+thermalization trajs   5000
 interpolation steps    200
 trajs/corr dump        500
 trajs/mom corr dump    0
