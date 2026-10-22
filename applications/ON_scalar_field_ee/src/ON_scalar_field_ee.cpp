@@ -1130,7 +1130,7 @@ int main(int argc, char **argv) {
     }
 #else
     {
-        auto lsizes = lattice.sizes();
+        auto lsizes = lattice.size();
         onsites(ALL) {
             auto c = X.coordinates();
             
