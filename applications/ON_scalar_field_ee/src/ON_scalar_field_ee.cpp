@@ -315,7 +315,7 @@ void ON_heatbath(T &S, const T &nnsum, atype kappa, atype lambda, const T &sourc
     T Sn = 0;
     atype vari = 1.0 / sqrt(2.0);
     Sn.gaussian_random(vari);
-    Sn += 0.5 * (kappa * nnsum + source);
+    Sn += 0.5 * (0.5 * kappa * nnsum + source);
     atype rSnsq = Sn.squarenorm() - 1.0;
     atype rSsq = S.squarenorm() - 1.0;
     atype texp = lambda * (rSnsq * rSnsq - rSsq * rSsq);
