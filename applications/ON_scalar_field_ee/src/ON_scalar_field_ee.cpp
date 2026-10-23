@@ -313,11 +313,11 @@ void move_filtered(const Field<T> (&S)[2], const Field<pT> &bcmsid, const Direct
 template <typename T, typename atype = hila::arithmetic_type<T>>
 void ON_heatbath(T &S, const T &nnsum, atype kappa, atype lambda, const T &source) {
     T Sn = 0;
-    atype vari = 1.0 / sqrt(2.0);
-    Sn.gaussian_random(vari);
-    Sn += 0.5 * (0.5 * kappa * nnsum + source);
-    atype rSnsq = Sn.squarenorm() - 1.0;
-    atype rSsq = S.squarenorm() - 1.0;
+    atype sigma = (atype)1.0 / sqrt(2.0);
+    Sn.gaussian_random(sigma);
+    Sn += 0.5 * (kappa * nnsum + source);
+    atype rSnsq = Sn.squarenorm() - (atype)1.0;
+    atype rSsq = S.squarenorm() - (atype)1.0;
     atype texp = lambda * (rSnsq * rSnsq - rSsq * rSsq);
     if (texp<=0 || hila::random() < exp(-texp)) {
         S = Sn;
