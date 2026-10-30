@@ -190,7 +190,7 @@ void move_filtered_p(const Field<T> (&S)[2], const Field<pT> &bcmsid, const Dire
             Sd[X] = S[1][X + d];
         } else {
             if (bcmsid[X] < p.max_bcms) {
-                Sd[X] = p.alpha * S[1][X + d] + (1.0 - p.alpha) * S[0][X + d];
+                Sd[X] = p.alpha * S[1][X + d] + ((ftype)1.0 - p.alpha) * S[0][X + d];
             } else {
                 Sd[X] = S[0][X + d];
             }
@@ -202,7 +202,7 @@ void move_filtered_p(const Field<T> (&S)[2], const Field<pT> &bcmsid, const Dire
                 Sd[X] += S[1][X - d];
             } else {
                 if (bcmsid[X] < p.max_bcms) {
-                    Sd[X] += p.alpha * S[1][X - d] + (1.0 - p.alpha) * S[0][X - d];
+                    Sd[X] += p.alpha * S[1][X - d] + ((ftype)1.0 - p.alpha) * S[0][X - d];
                 } else {
                     Sd[X] += S[0][X - d];
                 }
@@ -248,7 +248,7 @@ void move_filtered_k(const Field<T> (&S)[2], const Field<pT> &bcmsid, const Dire
                 tSK[X] = SK[1][X + d];
             } else {
                 if (bcmsid[X] < p.lc) {
-                    tSK[X] = p.alpha * SK[1][X + d] + (1.0 - p.alpha) * SK[0][X + d];
+                    tSK[X] = p.alpha * SK[1][X + d] + ((ftype)1.0 - p.alpha) * SK[0][X + d];
                 } else {
                     tSK[X] = SK[0][X + d];
                 }
@@ -260,7 +260,7 @@ void move_filtered_k(const Field<T> (&S)[2], const Field<pT> &bcmsid, const Dire
                     tSK[X] += SK[1][X - d];
                 } else {
                     if (bcmsid[X] < p.lc) {
-                        tSK[X] += p.alpha * SK[1][X - d] + (1.0 - p.alpha) * SK[0][X - d];
+                        tSK[X] += p.alpha * SK[1][X - d] + ((ftype)1.0 - p.alpha) * SK[0][X - d];
                     } else {
                         tSK[X] += SK[0][X - d];
                     }
