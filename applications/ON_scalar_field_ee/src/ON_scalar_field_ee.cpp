@@ -1115,7 +1115,7 @@ int main(int argc, char **argv) {
 
     // use a field bcmsid as look-up table for the magnitude of the spatial momentum vector in
     // Fourier space:
-    Field<ftype> bcmsid = 0;
+    Field<bcmstype> bcmsid = 0;
     bcmsid.set_nn_topo(1); // full e_t-periodicity (doesn't really matter, thought, since bcmsid is
                            // the same on all time slices)
 #if MOMENTUMSPACE==1
@@ -1141,6 +1141,9 @@ int main(int argc, char **argv) {
         bcmsid[X] += c[0] * cfac;
     }
 #endif
+
+    std::string bcmsid_file = "bcmsid.bout";
+    bcmsid.config_write(bcmsid_file);
 
     std::string output_fname = string_format("O%d", NCOLOR);
     output_fname += string_format("_d%d", NDIM);
