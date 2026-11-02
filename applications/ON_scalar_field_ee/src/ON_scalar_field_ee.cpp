@@ -959,24 +959,21 @@ public:
                 }
             }
         }
-
+#if NDIM > 2
         if (cn[e_y] >= lsize[e_y]) {
-            //cn[e_z] += 1;
             cn[e_y] = 0;
         }
         if (cn[e_y] < 0) {
-            //cn[e_z] -= 1;
             cn[e_y] = lsize[e_y] - 1;
         }
-#if NDIM > 2 
-            if (cn[e_z] >= lsize[e_z]) {
-                //cn[e_x] += 1;
-                cn[e_z] = 0;
-            }
-            if (cn[e_z] < 0) {
-                //cn[e_x] -= 1;
-                cn[e_z] = lsize[e_z] - 1;
-            }
+#endif
+#if NDIM > 3 
+        if (cn[e_z] >= lsize[e_z]) {
+            cn[e_z] = 0;
+        }
+        if (cn[e_z] < 0) {
+            cn[e_z] = lsize[e_z] - 1;
+        }
 #endif
         if (cn[e_x] >= lsize[e_x]) {
             cn[e_x] = 0;
