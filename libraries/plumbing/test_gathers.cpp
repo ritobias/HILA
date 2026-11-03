@@ -160,12 +160,21 @@ void gather_test() {
         hila::out0 << "testing field referencing with different nn-topology\n";
         // the following creates a new Field instance "rf" whose data references the field data of
         // Field "f". "rf" can then have independent nn-topology settings
-        Field<CoordinateVector> rf(f, 0);
+        f.set_nn_topo(0);
+        Field<CoordinateVector> rf;
+        rf.make_ref_to(f, 1);
         bool terminate = false;
+        onsites(ODD) {
+            f[X] *= -1;
+        }
         foralldir(d) {
             if (!terminate) {
+                rf.start_gather(-d);
                 Field<CoordinateVector> f1;
-                onsites(ALL) {
+                onsites(EVEN) {
+                    f1[X] = -rf[X + d];
+                }
+                onsites(ODD) {
                     f1[X] = rf[X + d];
                 }
                 // Since (*lattice.nn_map)(l, d) can't be called inside site-loop, we transfer the
@@ -178,7 +187,7 @@ void gather_test() {
                         CoordinateVector dif1 = 0;
                         for (size_t i = 0; i < svol; ++i) {
                             l = lattice.global_coordinates(it * svol + i);
-                            ln = (*(lattice.nn_map[0]))(l, d);
+                            ln = (*(lattice.nn_map[1]))(l, d);
                             dif1 = abs(f1l[i] - ln);
                             if (dif1.squarenorm() != 0) {
                                 hila::out0 << " gen std up-gather test error!"
@@ -195,7 +204,10 @@ void gather_test() {
             }
             if (!terminate) {
                 Field<CoordinateVector> f2;
-                onsites(ALL) {
+                onsites(EVEN) {
+                    f2[X] = -rf[X - d];
+                }
+                onsites(ODD) {
                     f2[X] = rf[X - d];
                 }
                 for (int it = 0; it < lattice.size(NDIM - 1); ++it) {
@@ -206,7 +218,7 @@ void gather_test() {
                         CoordinateVector dif2 = 0;
                         for (size_t i = 0; i < svol; ++i) {
                             l = lattice.global_coordinates(it * svol + i);
-                            ln = (*(lattice.nn_map[0]))(l, -d);
+                            ln = (*(lattice.nn_map[1]))(l, -d);
                             dif2 = abs(f2l[i] - ln);
                             if (dif2.squarenorm() != 0) {
                                 hila::out0 << " gen std down-gather test error! Node "

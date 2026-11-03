@@ -1107,15 +1107,12 @@ int main(int argc, char **argv) {
     hila::out0 << "p.min_bcms=" << p.min_bcms << ", p.max_bcms=" << p.max_bcms << "\n";
 #endif
 
-    // We need random number here
-    hila::seed_random(seed);
-
     // use a field bcmsid as look-up table for the magnitude of the spatial momentum vector in
     // Fourier space:
     Field<bcmstype> bcmsid = 0;
     bcmsid.set_nn_topo(1); // full e_t-periodicity (doesn't really matter, thought, since bcmsid is
                            // the same on all time slices)
-#if MOMENTUMSPACE==1
+#if MOMENTUMSPACE == 1
     onsites(ALL) {
         auto k = X.coordinates().convert_to_k();
         ftype sknorm = 0;
@@ -1211,6 +1208,8 @@ int main(int argc, char **argv) {
 
     if (!restore_checkpoint(S[0], start_traj, p)) {
         S[0] = 0;
+        // We need random number here
+        hila::seed_random(seed);
     }
     S[1].make_ref_to(S[0], 1);
 
