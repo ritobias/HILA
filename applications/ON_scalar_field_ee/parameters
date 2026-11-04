@@ -1,6 +1,6 @@
 # This is a parameter file for ON_scalar_field_ee
 
-lattice size           36,18,10
+lattice size           36,18,12
 kappa                  0.1
 lambda                 3.5
 source terms           0,0,0,0
