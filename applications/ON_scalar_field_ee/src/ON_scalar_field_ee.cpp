@@ -2,6 +2,7 @@
 #include "tools/string_format.h"
 #include "tools/floating_point_epsilon.h"
 #include <algorithm>
+#include <cmath>
 
 #ifndef NCOLOR
 #define NCOLOR 4
@@ -23,6 +24,7 @@ using bcmstype = int;
 struct parameters {
     ftype kappa;        // hopping parameter
     ftype lambda;       // quartic coupling (lattice definition)
+    ftype lnorm;        // log normalization constant for heatbath update
     fT source;          // source terms
     int s;              // number of replicas
     ftype l;            // momentum (position) space entangling region "shperical shell radius" ("slab width") l
@@ -34,7 +36,6 @@ struct parameters {
     int n_traj;         // number of trajectories to generate
     int n_therm;        // number of thermalization trajectories (counts only accepted traj.)
     int n_heatbath;     // number of heat-bath sweeps per "trajectory"
-    int n_multhits;     // number of corrected heat-bath hits per update
     int n_interp_steps; // number of interpolation steps to change alpha from 0 to 1
     int n_dump_corr;    // number of trajectories between correlator and condensate dumps
     int n_dump_mom_corr;// number of trajectories between momentum mode correlator dumps
@@ -311,16 +312,18 @@ void move_filtered(const Field<T> (&S)[2], const Field<pT> &bcmsid, const Direct
 // heat-bath functions
 
 template <typename T, typename atype = hila::arithmetic_type<T>>
-void ON_heatbath(T &S, const T &nnsum, atype kappa, atype lambda, const T &source) {
+void ON_heatbath(T &S, const T &nnsum, atype kappa, atype lambda, const T &source, atype lnorm) {
     T Sn = 0;
     atype sigma = (atype)1.0 / sqrt(2.0);
-    Sn.gaussian_random(sigma);
-    Sn += 0.5 * (kappa * nnsum + source);
-    atype rSnsq = Sn.squarenorm() - (atype)1.0;
-    atype rSsq = S.squarenorm() - (atype)1.0;
-    atype texp = lambda * (rSnsq * rSnsq - rSsq * rSsq);
-    if (texp<=0 || hila::random() < exp(-texp)) {
-        S = Sn;
+    while(true) {
+        Sn.gaussian_random(sigma);
+        Sn += 0.5 * (kappa * nnsum + source);
+        atype rSnsq = Sn.squarenorm() - (atype)1.0;
+        atype texp = -lambda * (rSnsq * rSnsq) - lnorm;
+        if (hila::random() < exp(texp)) {
+            S = Sn;
+            break;
+        }
     }
 }
 
@@ -360,9 +363,7 @@ void hb_update_parity(Field<T>(&S)[2], const Field<pT> &bcmsid, const parameters
     Direction td = Direction(NDIM - 1);
     onsites(par) {
         if(X.coordinate(td) % 2 == tpar) {
-            for (int i = 0; i < p.n_multhits; ++i) {
-                ON_heatbath(S[0][X], nnsum[X], p.kappa, p.lambda, p.source);
-            }
+            ON_heatbath(S[0][X], nnsum[X], p.kappa, p.lambda, p.source, p.lnorm);
         }
     }
 
@@ -1059,8 +1060,6 @@ int main(int argc, char **argv) {
     p.n_traj = par.get("number of trajectories");
     // number of heat-bath (HB) sweeps per trajectory
     p.n_heatbath = par.get("heatbath updates");
-    // number of multi-hits per HB update
-    p.n_multhits = par.get("number of hb hits");
     // number of thermalization trajectories
     p.n_therm = par.get("thermalization trajs");
     // number of alpha-interpolation steps
@@ -1079,6 +1078,15 @@ int main(int argc, char **argv) {
     p.config_file = par.get("config name");
 
     par.close(); // file is closed also when par goes out of scope
+
+    { 
+        double upi = std::acos(-1.0);
+        p.lnorm = (ftype)(-0.5 * p.lambda + log(0.25 * upi *
+                                                (2.0 * std::cyl_bessel_i(0.25, 0.5 * p.lambda) +
+                                                 (2.0 / upi) * std::sin(0.25 * upi) *
+                                                     std::cyl_bessel_k(0.25, 0.5 * p.lambda))));
+    }
+
 
     if(p.s<1) {
         hila::out0 << "Error: replica number s must be non-zero. Current value is s=" << p.s << "\n";
