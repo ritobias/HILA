@@ -24,7 +24,6 @@ using bcmstype = int;
 struct parameters {
     ftype kappa;        // hopping parameter
     ftype lambda;       // quartic coupling (lattice definition)
-    ftype lnorm;        // log normalization constant for heatbath update
     fT source;          // source terms
     int s;              // number of replicas
     ftype l;            // momentum (position) space entangling region "shperical shell radius" ("slab width") l
@@ -312,15 +311,16 @@ void move_filtered(const Field<T> (&S)[2], const Field<pT> &bcmsid, const Direct
 // heat-bath functions
 
 template <typename T, typename atype = hila::arithmetic_type<T>>
-void ON_heatbath(T &S, const T &nnsum, atype kappa, atype lambda, const T &source, atype lnorm) {
+void ON_heatbath(T &S, const T &nnsum, atype kappa, atype lambda, const T &source) {
     T Sn = 0;
-    atype sigma = (atype)1.0 / sqrt(2.0);
-    while(true) {
+    atype sigma = (atype)(1.0 / sqrt(2.0));
+    T tx0 = 0.5 * (kappa * nnsum + source);
+    while (true) {
         Sn.gaussian_random(sigma);
-        Sn += 0.5 * (kappa * nnsum + source);
+        Sn += tx0;
         atype rSnsq = Sn.squarenorm() - (atype)1.0;
-        atype texp = -lambda * (rSnsq * rSnsq) - lnorm;
-        if (hila::random() < exp(texp)) {
+        atype texp = -lambda * (rSnsq * rSnsq);
+        if (texp > fp<atype>::lmin && hila::random() < exp(texp)) {
             S = Sn;
             break;
         }
@@ -363,7 +363,7 @@ void hb_update_parity(Field<T>(&S)[2], const Field<pT> &bcmsid, const parameters
     Direction td = Direction(NDIM - 1);
     onsites(par) {
         if(X.coordinate(td) % 2 == tpar) {
-            ON_heatbath(S[0][X], nnsum[X], p.kappa, p.lambda, p.source, p.lnorm);
+            ON_heatbath(S[0][X], nnsum[X], p.kappa, p.lambda, p.source);
         }
     }
 
@@ -1078,15 +1078,6 @@ int main(int argc, char **argv) {
     p.config_file = par.get("config name");
 
     par.close(); // file is closed also when par goes out of scope
-
-    { 
-        double upi = std::acos(-1.0);
-        p.lnorm = (ftype)(-0.5 * p.lambda + log(0.25 * upi *
-                                                (2.0 * std::cyl_bessel_i(0.25, 0.5 * p.lambda) +
-                                                 (2.0 / upi) * std::sin(0.25 * upi) *
-                                                     std::cyl_bessel_k(0.25, 0.5 * p.lambda))));
-    }
-
 
     if(p.s<1) {
         hila::out0 << "Error: replica number s must be non-zero. Current value is s=" << p.s << "\n";

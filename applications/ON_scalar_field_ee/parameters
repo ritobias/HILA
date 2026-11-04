@@ -1,14 +1,14 @@
 # This is a parameter file for ON_scalar_field_ee
 
 lattice size           36,18,12
-kappa                  0.1
+kappa                  0.7
 lambda                 3.5
 source terms           0,0,0,0
-replica number         2
+replica number         1
 entangling region l    17.45
 entangling region lc   17.55
-alpha                  0.5
-dalpha                 0.5
+alpha                  0
+dalpha                 1
 number of trajectories 10000
 heatbath updates       100
 thermalization trajs   5000
