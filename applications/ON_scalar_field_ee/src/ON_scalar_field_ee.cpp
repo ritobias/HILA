@@ -325,6 +325,105 @@ void ON_heatbath(T &S, const T &nnsum, atype kappa, atype lambda, const T &sourc
             break;
         }
     }
+    return;
+}
+
+template <typename T, typename atype = hila::arithmetic_type<T>>
+void ON_metropolis_r(T &S, const T &nnsum, atype kappa, atype lambda, const T &source) {
+    double drsigma = 0.2;
+    double r = (double)S.norm();
+    double dr = hila::gaussrand() * drsigma;
+    double rn = r + dr;
+    if(rn <= 0) {
+        return;
+    }
+    if(r == 0) {
+        S.gaussian_random();
+        S /= S.norm();
+        S *= rn;
+        return;
+    }
+    T kdir = (kappa * nnsum + source);
+    double knorm = (double)kdir.norm();
+    kdir /= knorm;
+    double ar0 = (double)S.dot(kdir) / r;
+    double al = knorm * ar0;
+    double rsq = r * r - 1;
+    double rnsq = rn * rn - 1;
+    double texp = al * r - rsq - lambda * rsq * rsq;
+    double texpn = al * rn - rnsq - lambda * rnsq * rnsq;
+    double accp= pow(rn / r, T::size() - 1) * exp(texpn - texp);
+    if(hila::random() < accp) {
+        S *= rn / r;
+    }
+}
+
+template <typename T, typename atype = hila::arithmetic_type<T>>
+void ON_heatbath_const_r(T &S, const T &nnsum, atype kappa, atype lambda, const T &source) {
+#if NCOLOR > 2
+    double pi2 = M_PI * 2.0;
+    atype r=S.norm();
+    T kdir = (kappa * nnsum + source);
+    atype knorm = kdir.norm();
+    kdir /= knorm;
+    atype ar0 = 0;
+    atype al = knorm * r;
+
+#if NCOLOR == 3
+    double xl = exp((double)(-2.0 * al));
+    double xd = 1.0 - xl;
+    double xr = xl + xd * hila::random();
+    ar0 = (atype)(1.0 + log((double)xr) / al);
+#else
+    int test = 0;
+    if (al > sqrt(T::size())) { /* k-p algorithm */
+        double xr3, xr4, delsq;
+        for (int k = 0; k < 40 && !test; ++k) {
+            /* draw delsq from distribution delsq^(NCOLOR-2)/2 * exp(-al * delsq) */
+            delsq = -log(1.0 - hila::random());
+            for (int i = 0; i < (T::size() - 3) / 2; ++i) {
+                delsq -= log(1.0 - hila::random());
+            }
+            if(T::size() % 2 == 0) {
+                xr3 = cos(pi2 * hila::random());
+                delsq -= xr3 * xr3 *log(1.0 - hila::random());
+            }
+            delsq /= al;
+            /* correct for factor sqrt(1 - delsq/2)^(NCOLOR-3) */
+            if (delsq < 2.0) {
+                xr4 = hila::random();
+                if (pow(1.0 - 0.5 * delsq, (T::size() - 3)) > xr4 * xr4) {
+                    test = 1;
+                    ar0 = (atype)(1.0 - delsq);
+                }
+            }
+        }
+    } else { /* now al <= sqrt(NCOLOR) with creutz algorithm */
+        double xr1, xr2, xr, a0;
+        double xl = exp((double)(-2.0 * al));
+        double xd = 1.0 - xl;
+        for (int k = 0; k < 40 && test == 0; ++k) {
+            /* get two random numbers */
+            xr1 = hila::random();
+            xr2 = hila::random();
+            xr = xl + xd * xr1;
+            a0 = 1.0 + log((double)xr) / al;
+            /* correct for factor sqrt(1 - a0^2)^(NCOLOR-3) */
+            if (pow(1.0 - a0 * a0, T::size() - 3) > xr2 * xr2) {
+                ar0 = (atype)a0;
+                test = 1;
+            }
+        }
+    }
+
+    S.gaussian_random();
+    S -= S.dot(kdir) * kdir;
+    S /= S.norm();
+    S *= r * sqrt(1.0 - ar0 * ar0);
+    S += ar0 * r * kdir;
+#endif
+
+#endif
 }
 
 
@@ -363,7 +462,15 @@ void hb_update_parity(Field<T>(&S)[2], const Field<pT> &bcmsid, const parameters
     Direction td = Direction(NDIM - 1);
     onsites(par) {
         if(X.coordinate(td) % 2 == tpar) {
+#if NCOLOR > 2
+            if(hila::random() < 0.5) {
+                ON_heatbath_const_r(S[0][X], nnsum[X], p.kappa, p.lambda, p.source);
+            } else {
+                ON_metropolis_r(S[0][X], nnsum[X], p.kappa, p.lambda, p.source);
+            }
+#else
             ON_heatbath(S[0][X], nnsum[X], p.kappa, p.lambda, p.source);
+#endif
         }
     }
 
@@ -1206,9 +1313,10 @@ int main(int argc, char **argv) {
     Field<fT> S_back = 0;
 
     if (!restore_checkpoint(S[0], start_traj, p)) {
-        S[0] = 0;
         // We need random number here
         hila::seed_random(seed);
+        S[0].gaussian_random();
+        S[0] /= S[0].norm();
     }
     S[1].make_ref_to(S[0], 1);
 
