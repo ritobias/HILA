@@ -1310,6 +1310,8 @@ int main(int argc, char **argv) {
 
     // Alloc field (S) 
     Field<fT> S[2];
+    S[0] = 0;
+    S[1].make_ref_to(S[0], 1);
     Field<fT> S_back = 0;
 
     if (!restore_checkpoint(S[0], start_traj, p)) {
@@ -1318,7 +1320,7 @@ int main(int argc, char **argv) {
         S[0].gaussian_random();
         S[0] /= S[0].norm();
     }
-    S[1].make_ref_to(S[0], 1);
+    
 
     hila::timer update_timer("Updates");
     hila::timer measure_timer("Measurements");
