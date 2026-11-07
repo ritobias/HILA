@@ -375,10 +375,10 @@ void ON_heatbath_const_r(T &S, const T &nnsum, atype kappa, atype lambda, const 
     double xr = xl + xd * hila::random();
     ar0 = (atype)(1.0 + log((double)xr) / al);
 #else
-    int test = 0;
+    const int LOOPLIM = 100;
     if (al > sqrt(T::size())) { /* k-p algorithm */
         double xr3, xr4, delsq;
-        for (int k = 0; k < 40 && !test; ++k) {
+        for (int k = 0; k < LOOPLIM; ++k) {
             /* draw delsq from distribution delsq^(NCOLOR-2)/2 * exp(-al * delsq) */
             delsq = -log(1.0 - hila::random());
             for (int i = 0; i < (T::size() - 3) / 2; ++i) {
@@ -393,8 +393,8 @@ void ON_heatbath_const_r(T &S, const T &nnsum, atype kappa, atype lambda, const 
             if (delsq < 2.0) {
                 xr4 = hila::random();
                 if (pow(1.0 - 0.5 * delsq, (T::size() - 3)) > xr4 * xr4) {
-                    test = 1;
                     ar0 = (atype)(1.0 - delsq);
+                    break;
                 }
             }
         }
@@ -402,7 +402,7 @@ void ON_heatbath_const_r(T &S, const T &nnsum, atype kappa, atype lambda, const 
         double xr1, xr2, xr, a0;
         double xl = exp((double)(-2.0 * al));
         double xd = 1.0 - xl;
-        for (int k = 0; k < 40 && test == 0; ++k) {
+        for (int k = 0; k < LOOPLIM; ++k) {
             /* get two random numbers */
             xr1 = hila::random();
             xr2 = hila::random();
@@ -411,7 +411,7 @@ void ON_heatbath_const_r(T &S, const T &nnsum, atype kappa, atype lambda, const 
             /* correct for factor sqrt(1 - a0^2)^(NCOLOR-3) */
             if (pow(1.0 - a0 * a0, T::size() - 3) > xr2 * xr2) {
                 ar0 = (atype)a0;
-                test = 1;
+                break;
             }
         }
     }
