@@ -337,23 +337,13 @@ void ON_metropolis_r(T &S, const T &nnsum, atype kappa, atype lambda, const T &s
     if(rn <= 0) {
         return;
     }
-    if(r == 0) {
-        S.gaussian_random();
-        S /= S.norm();
-        S *= rn;
-        return;
-    }
     T kdir = (kappa * nnsum + source);
-    double knorm = (double)kdir.norm();
-    kdir /= knorm;
-    double ar0 = (double)S.dot(kdir) / r;
-    double al = knorm * ar0;
+    double al = (double)S.dot(kdir) / r;
     double rsq = r * r - 1;
     double rnsq = rn * rn - 1;
-    double texp = al * r - rsq - lambda * rsq * rsq;
-    double texpn = al * rn - rnsq - lambda * rnsq * rnsq;
-    double accp= pow(rn / r, T::size() - 1) * exp(texpn - texp);
-    if(hila::random() < accp) {
+    double dtexp = (double)(T::size() - 1) * (log(rn) - log(r)) + al * (rn - r) - (rnsq - rsq) -
+                   lambda * (rnsq * rnsq - rsq * rsq);
+    if (dtexp >= 1.0 || (dtexp > fp<atype>::lmin && hila::random() < exp(dtexp))) {
         S *= rn / r;
     }
 }
@@ -362,7 +352,7 @@ template <typename T, typename atype = hila::arithmetic_type<T>>
 void ON_heatbath_const_r(T &S, const T &nnsum, atype kappa, atype lambda, const T &source) {
 #if NCOLOR > 2
     double pi2 = M_PI * 2.0;
-    atype r=S.norm();
+    atype r = S.norm();
     T kdir = (kappa * nnsum + source);
     atype knorm = kdir.norm();
     kdir /= knorm;
@@ -376,7 +366,7 @@ void ON_heatbath_const_r(T &S, const T &nnsum, atype kappa, atype lambda, const 
     ar0 = (atype)(1.0 + log((double)xr) / al);
 #else
     const int LOOPLIM = 100;
-    if (al > sqrt(T::size())) { /* k-p algorithm */
+    if (al > ::sqrt((double)T::size())) { /* k-p algorithm */
         double xr3, xr4, delsq;
         for (int k = 0; k < LOOPLIM; ++k) {
             /* draw delsq from distribution delsq^(NCOLOR-2)/2 * exp(-al * delsq) */
@@ -386,7 +376,7 @@ void ON_heatbath_const_r(T &S, const T &nnsum, atype kappa, atype lambda, const 
             }
             if(T::size() % 2 == 0) {
                 xr3 = cos(pi2 * hila::random());
-                delsq -= xr3 * xr3 *log(1.0 - hila::random());
+                delsq -= xr3 * xr3 * log(1.0 - hila::random());
             }
             delsq /= al;
             /* correct for factor sqrt(1 - delsq/2)^(NCOLOR-3) */
@@ -415,11 +405,12 @@ void ON_heatbath_const_r(T &S, const T &nnsum, atype kappa, atype lambda, const 
             }
         }
     }
-
     S.gaussian_random();
     S -= S.dot(kdir) * kdir;
-    S /= S.norm();
-    S *= r * sqrt(1.0 - ar0 * ar0);
+    double rs = S.norm();
+    if(rs > 0) {
+        S *= sqrt(1.0 - ar0 * ar0) * r / rs;
+    }
     S += ar0 * r * kdir;
 #endif
 
@@ -473,7 +464,6 @@ void hb_update_parity(Field<T>(&S)[2], const Field<pT> &bcmsid, const parameters
 #endif
         }
     }
-
     hb_timer.stop();
 }
 
@@ -548,6 +538,7 @@ double measure_s(const Field<T> (&S)[2], const Field<pT> &bcmsid, const paramete
             }
         }
     }
+
     // potential term:
     onsites(ALL) {
         atype S2 = S[0][X].squarenorm();
@@ -685,12 +676,18 @@ void measure_wall_wall_corr_vs_dist(const Field<T> (&S)[2], const Field<pT> &bcm
     }
 
     for (int ir = 1; ir < nd; ++ir) {
-        if(d < NDIM - 1) {
+        if(p.s > 1) {
+            if(d < NDIM - 1) {
+                onsites(ALL) {
+                    tS[1 - ip][0][X] = tS[ip][0][X + d];
+                }
+            } else {
+                move_filtered(tS[ip], bcmsid, d, ALL, false, tS[1 - ip][0], p);
+            }
+        } else {
             onsites(ALL) {
                 tS[1 - ip][0][X] = tS[ip][0][X + d];
             }
-        } else {
-            move_filtered(tS[ip], bcmsid, d, ALL, false, tS[1 - ip][0], p);
         }
         ip = 1 - ip;
 
@@ -876,7 +873,6 @@ void do_interp_hb_trajectory(Field<T> (&S)[2], const Field<pT> &bcmsid, paramete
         p.alpha = alpha0 + n * dalpha;
 
         hb_update(S, bcmsid, p);
-
     }
     ds += measure_ds_dalpha(S, bcmsid, p); // work done during last interpolation step
 
@@ -1213,6 +1209,26 @@ int main(int argc, char **argv) {
     hila::out0 << "p.min_bcms=" << p.min_bcms << ", p.max_bcms=" << p.max_bcms << "\n";
 #endif
 
+    // use negative trajectory for thermal
+    int start_traj = -p.n_therm;
+
+    // Alloc field (S)
+    Field<fT> S[2];
+    Field<fT> S_back = 0;
+    if (!restore_checkpoint(S[0], start_traj, p)) {
+        // We need random number here
+        hila::seed_random(seed);
+        onsites(ALL) {
+            ftype Sr = 0;
+            while(Sr <= 0) {
+                S[0][X].gaussian_random();
+                Sr = S[0][X].norm();
+                S[0][X] /= Sr;
+            }
+        }
+    }
+    S[1].make_ref_to(S[0], 1);
+
     // use a field bcmsid as look-up table for the magnitude of the spatial momentum vector in
     // Fourier space:
     Field<bcmstype> bcmsid = 0;
@@ -1305,22 +1321,6 @@ int main(int argc, char **argv) {
         }
     }
 
-    // use negative trajectory for thermal
-    int start_traj = -p.n_therm;
-
-    // Alloc field (S) 
-    Field<fT> S[2];
-    S[0] = 0;
-    S[1].make_ref_to(S[0], 1);
-    Field<fT> S_back = 0;
-
-    if (!restore_checkpoint(S[0], start_traj, p)) {
-        // We need random number here
-        hila::seed_random(seed);
-        S[0].gaussian_random();
-        S[0] /= S[0].norm();
-    }
-    
 
     hila::timer update_timer("Updates");
     hila::timer measure_timer("Measurements");
