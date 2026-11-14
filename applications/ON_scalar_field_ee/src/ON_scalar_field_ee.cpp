@@ -12,6 +12,10 @@ using ftype = double;
 using fT = Vector<NCOLOR, ftype>;
 using fTf = Vector<NCOLOR, float>;
 
+#ifndef HBMODE
+#define HBMODE 1
+#endif
+
 #ifndef MOMENTUMSPACE
 #define MOMENTUMSPACE 1
 using bcmstype = ftype;
@@ -311,25 +315,8 @@ void move_filtered(const Field<T> (&S)[2], const Field<pT> &bcmsid, const Direct
 // heat-bath functions
 
 template <typename T, typename atype = hila::arithmetic_type<T>>
-void ON_heatbath(T &S, const T &nnsum, atype kappa, atype lambda, const T &source) {
-    T Sn = 0;
-    atype sigma = (atype)(1.0 / sqrt(2.0));
-    T tx0 = 0.5 * (kappa * nnsum + source);
-    while (true) {
-        Sn.gaussian_random(sigma);
-        Sn += tx0;
-        atype rSnsq = Sn.squarenorm() - (atype)1.0;
-        atype texp = -lambda * (rSnsq * rSnsq);
-        if (texp > fp<atype>::lmin && hila::random() < exp(texp)) {
-            S = Sn;
-            break;
-        }
-    }
-    return;
-}
-
-template <typename T, typename atype = hila::arithmetic_type<T>>
 void ON_metropolis_r(T &S, const T &nnsum, atype kappa, atype lambda, const T &source) {
+#if NCOLOR > 1
     double drsigma = 0.2;
     double r = (double)S.norm();
     double dr = hila::gaussrand() * drsigma;
@@ -346,11 +333,25 @@ void ON_metropolis_r(T &S, const T &nnsum, atype kappa, atype lambda, const T &s
     if (dtexp >= 1.0 || (dtexp > fp<atype>::lmin && hila::random() < exp(dtexp))) {
         S *= rn / r;
     }
+#else
+    double drsigma = 0.2;
+    double r = (double)S[0];
+    double dr = hila::gaussrand() * drsigma;
+    double rn = r * (double)(1 - 2 * (int)(2.0 * hila::random())) + dr;
+
+    double al  = (kappa * nnsum[0] + source[0]);
+    double rsq = r * r - 1;
+    double rnsq = rn * rn - 1;
+    double dtexp = al * (rn - r) - (rnsq - rsq) - lambda * (rnsq * rnsq - rsq * rsq);
+    if (dtexp >= 1.0 || (dtexp > fp<atype>::lmin && hila::random() < exp(dtexp))) {
+        S[0] = rn;
+    }
+#endif
 }
 
 template <typename T, typename atype = hila::arithmetic_type<T>>
 void ON_heatbath_const_r(T &S, const T &nnsum, atype kappa, atype lambda, const T &source) {
-#if NCOLOR > 2
+#if NCOLOR > 1
     double pi2 = M_PI * 2.0;
     atype r = S.norm();
     T kdir = (kappa * nnsum + source);
@@ -359,14 +360,30 @@ void ON_heatbath_const_r(T &S, const T &nnsum, atype kappa, atype lambda, const 
     atype ar0 = 0;
     atype al = knorm * r;
 
-#if NCOLOR == 3
+#if NCOLOR == 2
+    double pi = M_PI;
+    double theta0 = (double)acos(S.dot(kdir) / r);
+    double theta = theta0 + hila::gaussrand() * 0.25 * pi2;
+    if(theta>pi) {
+        theta -= pi2;
+    }
+    if(theta<-pi) {
+        theta += pi2;
+    }
+    double dexp = al * (cos(theta) - cos(theta0));
+    if(dexp > fp<atype>::lmin && hila::random() < exp(dexp)) {
+        ar0 = (atype)cos(theta);
+    } else {
+        ar0 = (atype)cos(theta0);
+    }
+#elif NCOLOR == 3
     double xl = exp((double)(-2.0 * al));
     double xd = 1.0 - xl;
     double xr = xl + xd * hila::random();
     ar0 = (atype)(1.0 + log((double)xr) / al);
 #else
     const int LOOPLIM = 100;
-    if (al > ::sqrt((double)T::size())) { /* k-p algorithm */
+    if (al > ::sqrt((double)T::size())) { /* k-p-like algorithm */
         double xr3, xr4, delsq;
         for (int k = 0; k < LOOPLIM; ++k) {
             /* draw delsq from distribution delsq^(NCOLOR-2)/2 * exp(-al * delsq) */
@@ -388,7 +405,7 @@ void ON_heatbath_const_r(T &S, const T &nnsum, atype kappa, atype lambda, const 
                 }
             }
         }
-    } else { /* now al <= sqrt(NCOLOR) with creutz algorithm */
+    } else { /* now al <= sqrt(NCOLOR) with creutz-like algorithm */
         double xr1, xr2, xr, a0;
         double xl = exp((double)(-2.0 * al));
         double xd = 1.0 - xl;
@@ -453,14 +470,14 @@ void hb_update_parity(Field<T>(&S)[2], const Field<pT> &bcmsid, const parameters
     Direction td = Direction(NDIM - 1);
     onsites(par) {
         if(X.coordinate(td) % 2 == tpar) {
-#if NCOLOR > 2
+#if NCOLOR > 1
             if(hila::random() < 0.5) {
-                ON_heatbath_const_r(S[0][X], nnsum[X], p.kappa, p.lambda, p.source);
+                ON_metropolis_r(S[0][X], nnsum[X], p.kappa, p.lambda, p.source);
             } else {
                 ON_metropolis_r(S[0][X], nnsum[X], p.kappa, p.lambda, p.source);
             }
 #else
-            ON_heatbath(S[0][X], nnsum[X], p.kappa, p.lambda, p.source);
+            ON_metropolis_r(S[0][X], nnsum[X], p.kappa, p.lambda, p.source);
 #endif
         }
     }
@@ -1197,6 +1214,12 @@ int main(int argc, char **argv) {
 
     // set up the lattice
     lattice.setup(lsize);
+
+#if HBMODE == 1 && NCOLOR > 2
+    hila::out0 << "UPDATE ALGORITHM: O(N)-orientation heat bath with radial Metropolis.\n";
+#else
+    hila::out0 << "UPDATE ALGORITHM: potential-corrected Gaussian heat bath.\n";
+#endif
 
 #if MOMENTUMSPACE == 1
     hila::out0 << "Using momentum space entangling region.\n";
