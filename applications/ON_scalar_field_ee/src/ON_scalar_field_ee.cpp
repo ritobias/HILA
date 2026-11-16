@@ -472,7 +472,7 @@ void hb_update_parity(Field<T>(&S)[2], const Field<pT> &bcmsid, const parameters
         if(X.coordinate(td) % 2 == tpar) {
 #if NCOLOR > 1
             if(hila::random() < 0.5) {
-                ON_metropolis_r(S[0][X], nnsum[X], p.kappa, p.lambda, p.source);
+                ON_heatbath_const_r(S[0][X], nnsum[X], p.kappa, p.lambda, p.source);
             } else {
                 ON_metropolis_r(S[0][X], nnsum[X], p.kappa, p.lambda, p.source);
             }
