@@ -352,7 +352,7 @@ void ON_metropolis_r(T &S, const T &nnsum, atype kappa, atype lambda, const T &s
 template <typename T, typename atype = hila::arithmetic_type<T>>
 void ON_heatbath_const_r(T &S, const T &nnsum, atype kappa, atype lambda, const T &source) {
 #if NCOLOR > 1
-    double pi2 = M_PI * 2.0;
+    const double pi2 = M_PI * 2.0;
     atype r = S.norm();
     T kdir = (kappa * nnsum + source);
     atype knorm = kdir.norm();
@@ -361,29 +361,43 @@ void ON_heatbath_const_r(T &S, const T &nnsum, atype kappa, atype lambda, const 
     atype al = knorm * r;
 
 #if NCOLOR == 2
-    double pi = M_PI;
-    double theta0 = (double)acos(S.dot(kdir) / r);
-    double theta = theta0 + hila::gaussrand() * 0.25 * pi2;
-    if(theta>pi) {
-        theta -= pi2;
-    }
-    if(theta<-pi) {
-        theta += pi2;
-    }
-    double dexp = al * (cos(theta) - cos(theta0));
-    if(dexp > fp<atype>::lmin && hila::random() < exp(dexp)) {
-        ar0 = (atype)cos(theta);
-    } else {
-        ar0 = (atype)cos(theta0);
+    /* best - fisher algorithm */
+    const int LOOPLIM = 100;
+    const double pi = M_PI;
+    double tau = 1.0 + ::sqrt(1.0 + 4.0 * al * al);
+    double rho = (tau - ::sqrt(2.0 * tau)) / (2.0 * al);
+    double x = (1.0 + rho * rho) / (2.0 * rho);
+    double u1, u2;
+    for (int k = 0; k < LOOPLIM; ++k) {
+        do {
+            u1 = hila::random();
+        } while (u1 == 0.0);
+        do {
+            u2 = hila::random();
+        } while (u2 == 0.0);
+        double z = cos(pi * u1);
+        double f = (1.0 + x * z) / (x + z);
+        double c = al * (x - f);
+        if (c * (2.0 - c) - u2 > 0.0 || log(c / u2) + 1.0 - c >= 0.0) {
+            if (hila::random() < 0.5) {
+                ar0 = (atype)::acos(f);
+            } else {
+                ar0 = (atype)(-::acos(f));
+            }
+            break;
+        }
     }
 #elif NCOLOR == 3
+    /* creutz-like algorithm (no correction needed for NCOLOR==3) */
     double xl = exp((double)(-2.0 * al));
     double xd = 1.0 - xl;
     double xr = xl + xd * hila::random();
     ar0 = (atype)(1.0 + log((double)xr) / al);
 #else
+#if NCOLOR == 4
     const int LOOPLIM = 100;
-    if (al > ::sqrt((double)T::size())) { /* k-p-like algorithm */
+    if (al > (atype)1.0) { /* k-p-like algorithm (modified: delsq-term from correction factor is
+                              absorbed into gaussian) */
         double xr3, xr4, delsq;
         for (int k = 0; k < LOOPLIM; ++k) {
             /* draw delsq from distribution delsq^(NCOLOR-2)/2 * exp(-al * delsq) */
@@ -391,21 +405,22 @@ void ON_heatbath_const_r(T &S, const T &nnsum, atype kappa, atype lambda, const 
             for (int i = 0; i < (T::size() - 3) / 2; ++i) {
                 delsq -= log(1.0 - hila::random());
             }
-            if(T::size() % 2 == 0) {
+            if (T::size() % 2 == 0) {
                 xr3 = cos(pi2 * hila::random());
                 delsq -= xr3 * xr3 * log(1.0 - hila::random());
             }
-            delsq /= al;
+            delsq /= al + (double)(T::size() - 3) / 4.0;
             /* correct for factor sqrt(1 - delsq/2)^(NCOLOR-3) */
             if (delsq < 2.0) {
                 xr4 = hila::random();
-                if (pow(1.0 - 0.5 * delsq, (T::size() - 3)) > xr4 * xr4) {
+                if (log(xr4) <
+                    0.5 * (double)(T::size() - 3) * (log(1.0 - 0.5 * delsq) + 0.5 * delsq)) {
                     ar0 = (atype)(1.0 - delsq);
                     break;
                 }
             }
         }
-    } else { /* now al <= sqrt(NCOLOR) with creutz-like algorithm */
+    } else { /* now al <= 1.0  with creutz-like algorithm */
         double xr1, xr2, xr, a0;
         double xl = exp((double)(-2.0 * al));
         double xd = 1.0 - xl;
@@ -422,6 +437,51 @@ void ON_heatbath_const_r(T &S, const T &nnsum, atype kappa, atype lambda, const 
             }
         }
     }
+#else
+    const atype allim = (atype)(-1.3603486669498444 - 0.6795107426530612 * NCOLOR +
+                         0.45452224799664254 * NCOLOR * NCOLOR) /
+                        (2.392782522285113 + 0.7494536749185061 * NCOLOR);
+    const int LOOPLIM = 100;
+    if (al > allim) { /* k-p-like algorithm (modified: delsq-term from correction factor is absorbed
+                         into gaussian) */
+        double xr3, xr4, delsq;
+        for (int k = 0; k < LOOPLIM; ++k) {
+            /* draw delsq from distribution delsq^(NCOLOR-2)/2 * exp(-(al + 0.25 * (T::size() - 3)) * delsq) */
+            delsq = -log(1.0 - hila::random());
+            for (int i = 0; i < (T::size() - 3) / 2; ++i) {
+                delsq -= log(1.0 - hila::random());
+            }
+            if(T::size() % 2 == 0) {
+                xr3 = cos(pi2 * hila::random());
+                delsq -= xr3 * xr3 * log(1.0 - hila::random());
+            }
+            delsq /= al + 0.25 * (double)(T::size() - 3);
+            /* correct for factor sqrt(1 - delsq/2)^(NCOLOR-3) * exp(delsq * (NCOLOR-3) / 4) */
+            if (delsq < 2.0) {
+                xr4 = hila::random();
+                if (log(xr4) < 0.5 * (double)(T::size() - 3) * (log(1.0 - 0.5 * delsq) + 0.5 * delsq)) {
+                    ar0 = (atype)(1.0 - delsq);
+                    break;
+                }
+            }
+        }
+    } else { /* now al <= allim  with shifted and corrected gaussian instead of creutz-like
+                algorithm */
+        double a0;
+        double x0 = al / (double)(T::size() - 3);
+        double sigma = 1.0 / sqrt((double)(T::size() - 3));
+        for (int k = 0; k < LOOPLIM; ++k) {
+            a0 = hila::gaussrand() * sigma + x0;
+            if(-1.0 < a0 && a0 < 1.0) {
+                if (log(hila::random()) <
+                    0.5 * (double)(T::size() - 3) * (log(1.0 - a0 * a0) + a0 * a0)) {
+                    ar0 = (atype)a0;
+                    break;
+                }
+            }
+        }
+    }
+#endif
     S.gaussian_random();
     S -= S.dot(kdir) * kdir;
     double rs = S.norm();
