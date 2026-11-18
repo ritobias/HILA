@@ -312,7 +312,7 @@ void move_filtered(const Field<T> (&S)[2], const Field<pT> &bcmsid, const Direct
 // - s.\phi(x) )
 //
 ///////////////////////////////////////////////////////////////////////////////////
-// heat-bath functions
+// update functions
 
 template <typename T, typename atype = hila::arithmetic_type<T>>
 void ON_metropolis_r(T &S, const T &nnsum, atype kappa, atype lambda, const T &source) {
@@ -334,17 +334,27 @@ void ON_metropolis_r(T &S, const T &nnsum, atype kappa, atype lambda, const T &s
         S *= rn / r;
     }
 #else
-    double drsigma = 0.2;
-    double r = (double)S[0];
-    double dr = hila::gaussrand() * drsigma;
-    double rn = r * (double)(1 - 2 * (int)(2.0 * hila::random())) + dr;
-
-    double al  = (kappa * nnsum[0] + source[0]);
-    double rsq = r * r - 1;
-    double rnsq = rn * rn - 1;
-    double dtexp = al * (rn - r) - (rnsq - rsq) - lambda * (rnsq * rnsq - rsq * rsq);
-    if (dtexp >= 1.0 || (dtexp > fp<atype>::lmin && hila::random() < ::exp(dtexp))) {
-        S[0] = rn;
+    if(lambda >= 0) {
+        double drsigma = 0.2;
+        double r = (double)S[0];
+        double dr = hila::gaussrand() * drsigma;
+        double rn = r * (double)(1 - 2 * (int)(2.0 * hila::random())) + dr;
+        T kdir = (kappa * nnsum + source);
+        double al  = (double)(kdir[0]);
+        double rsq = r * r - 1;
+        double rnsq = rn * rn - 1;
+        double dtexp = al * (rn - r) - (rnsq - rsq) - lambda * (rnsq * rnsq - rsq * rsq);
+        if (dtexp >= 1.0 || (dtexp > fp<atype>::lmin && hila::random() < ::exp(dtexp))) {
+            S[0] = rn;
+        }
+    } else {  
+        double r = (double)S[0];
+        double rn = -r;
+        double al = (kappa * nnsum[0] + source[0]);
+        double dtexp = al * (rn - r);
+        if (dtexp >= 1.0 || (dtexp > fp<atype>::lmin && hila::random() < ::exp(dtexp))) {
+            S[0] = rn;
+        }
     }
 #endif
 }
@@ -524,10 +534,10 @@ void hb_update_parity(Field<T>(&S)[2], const Field<pT> &bcmsid, const parameters
     onsites(par) {
         if(X.coordinate(td) % 2 == tpar) {
 #if NCOLOR > 1
-            if(hila::random() < 0.5) {
-                ON_heatbath_const_r(S[0][X], nnsum[X], p.kappa, p.lambda, p.source);
-            } else {
+            if(p.lambda >= 0 && hila::random() < 0.5) {
                 ON_metropolis_r(S[0][X], nnsum[X], p.kappa, p.lambda, p.source);
+            } else {
+                ON_heatbath_const_r(S[0][X], nnsum[X], p.kappa, p.lambda, p.source);
             }
 #else
             ON_metropolis_r(S[0][X], nnsum[X], p.kappa, p.lambda, p.source);
