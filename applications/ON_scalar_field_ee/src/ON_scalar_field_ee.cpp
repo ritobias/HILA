@@ -328,9 +328,9 @@ void ON_metropolis_r(T &S, const T &nnsum, atype kappa, atype lambda, const T &s
     double al = (double)S.dot(kdir) / r;
     double rsq = r * r - 1;
     double rnsq = rn * rn - 1;
-    double dtexp = (double)(T::size() - 1) * (log(rn) - log(r)) + al * (rn - r) - (rnsq - rsq) -
+    double dtexp = (double)(T::size() - 1) * (::log(rn) - ::log(r)) + al * (rn - r) - (rnsq - rsq) -
                    lambda * (rnsq * rnsq - rsq * rsq);
-    if (dtexp >= 1.0 || (dtexp > fp<atype>::lmin && hila::random() < exp(dtexp))) {
+    if (dtexp >= 1.0 || (dtexp > fp<atype>::lmin && hila::random() < ::exp(dtexp))) {
         S *= rn / r;
     }
 #else
@@ -343,7 +343,7 @@ void ON_metropolis_r(T &S, const T &nnsum, atype kappa, atype lambda, const T &s
     double rsq = r * r - 1;
     double rnsq = rn * rn - 1;
     double dtexp = al * (rn - r) - (rnsq - rsq) - lambda * (rnsq * rnsq - rsq * rsq);
-    if (dtexp >= 1.0 || (dtexp > fp<atype>::lmin && hila::random() < exp(dtexp))) {
+    if (dtexp >= 1.0 || (dtexp > fp<atype>::lmin && hila::random() < ::exp(dtexp))) {
         S[0] = rn;
     }
 #endif
@@ -375,46 +375,46 @@ void ON_heatbath_const_r(T &S, const T &nnsum, atype kappa, atype lambda, const 
         do {
             u2 = hila::random();
         } while (u2 == 0.0);
-        double z = cos(pi * u1);
+        double z = ::cos(pi * u1);
         double f = (1.0 + x * z) / (x + z);
         double c = al * (x - f);
-        if (c * (2.0 - c) - u2 > 0.0 || log(c / u2) + 1.0 - c >= 0.0) {
+        if (c * (2.0 - c) - u2 > 0.0 || ::log(c / u2) + 1.0 - c >= 0.0) {
             if (hila::random() < 0.5) {
                 ar0 = (atype)::acos(f);
             } else {
-                ar0 = (atype)(-::acos(f));
+                ar0 = -(atype)::acos(f);
             }
             break;
         }
     }
 #elif NCOLOR == 3
     /* creutz-like algorithm (no correction needed for NCOLOR==3) */
-    double xl = exp((double)(-2.0 * al));
+    double xl = ::exp((double)(-2.0 * al));
     double xd = 1.0 - xl;
     double xr = xl + xd * hila::random();
-    ar0 = (atype)(1.0 + log((double)xr) / al);
+    ar0 = (atype)(1.0 + ::log((double)xr) / al);
 #else
 #if NCOLOR == 4
     const int LOOPLIM = 100;
-    if (al > (atype)1.0) { /* k-p-like algorithm (modified: delsq-term from correction factor is
+    if (al > (atype)1.06) { /* k-p-like algorithm (modified: delsq-term from correction factor is
                               absorbed into gaussian) */
         double xr3, xr4, delsq;
         for (int k = 0; k < LOOPLIM; ++k) {
             /* draw delsq from distribution delsq^(NCOLOR-2)/2 * exp(-al * delsq) */
-            delsq = -log(1.0 - hila::random());
+            delsq = -::log(1.0 - hila::random());
             for (int i = 0; i < (T::size() - 3) / 2; ++i) {
-                delsq -= log(1.0 - hila::random());
+                delsq -= ::log(1.0 - hila::random());
             }
             if (T::size() % 2 == 0) {
-                xr3 = cos(pi2 * hila::random());
-                delsq -= xr3 * xr3 * log(1.0 - hila::random());
+                xr3 = ::cos(pi2 * hila::random());
+                delsq -= xr3 * xr3 * ::log(1.0 - hila::random());
             }
             delsq /= al + (double)(T::size() - 3) / 4.0;
             /* correct for factor sqrt(1 - delsq/2)^(NCOLOR-3) */
             if (delsq < 2.0) {
                 xr4 = hila::random();
-                if (log(xr4) <
-                    0.5 * (double)(T::size() - 3) * (log(1.0 - 0.5 * delsq) + 0.5 * delsq)) {
+                if (::log(xr4) <
+                        0.5 * (double)(T::size() - 3) * (::log(1.0 - 0.5 * delsq) + 0.5 * delsq)) {
                     ar0 = (atype)(1.0 - delsq);
                     break;
                 }
@@ -422,14 +422,14 @@ void ON_heatbath_const_r(T &S, const T &nnsum, atype kappa, atype lambda, const 
         }
     } else { /* now al <= 1.0  with creutz-like algorithm */
         double xr1, xr2, xr, a0;
-        double xl = exp((double)(-2.0 * al));
+        double xl = ::exp((double)(-2.0 * al));
         double xd = 1.0 - xl;
         for (int k = 0; k < LOOPLIM; ++k) {
             /* get two random numbers */
             xr1 = hila::random();
             xr2 = hila::random();
             xr = xl + xd * xr1;
-            a0 = 1.0 + log((double)xr) / al;
+            a0 = 1.0 + ::log((double)xr) / al;
             /* correct for factor sqrt(1 - a0^2)^(NCOLOR-3) */
             if (pow(1.0 - a0 * a0, T::size() - 3) > xr2 * xr2) {
                 ar0 = (atype)a0;
@@ -447,19 +447,19 @@ void ON_heatbath_const_r(T &S, const T &nnsum, atype kappa, atype lambda, const 
         double xr3, xr4, delsq;
         for (int k = 0; k < LOOPLIM; ++k) {
             /* draw delsq from distribution delsq^(NCOLOR-2)/2 * exp(-(al + 0.25 * (T::size() - 3)) * delsq) */
-            delsq = -log(1.0 - hila::random());
+            delsq = -::log(1.0 - hila::random());
             for (int i = 0; i < (T::size() - 3) / 2; ++i) {
-                delsq -= log(1.0 - hila::random());
+                delsq -= ::log(1.0 - hila::random());
             }
             if(T::size() % 2 == 0) {
-                xr3 = cos(pi2 * hila::random());
-                delsq -= xr3 * xr3 * log(1.0 - hila::random());
+                xr3 = ::cos(pi2 * hila::random());
+                delsq -= xr3 * xr3 * ::log(1.0 - hila::random());
             }
             delsq /= al + 0.25 * (double)(T::size() - 3);
             /* correct for factor sqrt(1 - delsq/2)^(NCOLOR-3) * exp(delsq * (NCOLOR-3) / 4) */
             if (delsq < 2.0) {
                 xr4 = hila::random();
-                if (log(xr4) < 0.5 * (double)(T::size() - 3) * (log(1.0 - 0.5 * delsq) + 0.5 * delsq)) {
+                if (::log(xr4) < 0.5 * (double)(T::size() - 3) * (::log(1.0 - 0.5 * delsq) + 0.5 * delsq)) {
                     ar0 = (atype)(1.0 - delsq);
                     break;
                 }
@@ -469,12 +469,12 @@ void ON_heatbath_const_r(T &S, const T &nnsum, atype kappa, atype lambda, const 
                 algorithm */
         double a0;
         double x0 = al / (double)(T::size() - 3);
-        double sigma = 1.0 / sqrt((double)(T::size() - 3));
+        double sigma = 1.0 / ::sqrt((double)(T::size() - 3));
         for (int k = 0; k < LOOPLIM; ++k) {
             a0 = hila::gaussrand() * sigma + x0;
             if(-1.0 < a0 && a0 < 1.0) {
-                if (log(hila::random()) <
-                    0.5 * (double)(T::size() - 3) * (log(1.0 - a0 * a0) + a0 * a0)) {
+                if (::log(hila::random()) <
+                    0.5 * (double)(T::size() - 3) * (::log(1.0 - a0 * a0) + a0 * a0)) {
                     ar0 = (atype)a0;
                     break;
                 }
@@ -486,7 +486,7 @@ void ON_heatbath_const_r(T &S, const T &nnsum, atype kappa, atype lambda, const 
     S -= S.dot(kdir) * kdir;
     double rs = S.norm();
     if(rs > 0) {
-        S *= sqrt(1.0 - ar0 * ar0) * r / rs;
+        S *= ::sqrt(1.0 - ar0 * ar0) * r / rs;
     }
     S += ar0 * r * kdir;
 #endif
@@ -1275,10 +1275,10 @@ int main(int argc, char **argv) {
     // set up the lattice
     lattice.setup(lsize);
 
-#if HBMODE == 1 && NCOLOR > 2
+#if HBMODE == 1 && NCOLOR > 1
     hila::out0 << "UPDATE ALGORITHM: O(N)-orientation heat bath with radial Metropolis.\n";
 #else
-    hila::out0 << "UPDATE ALGORITHM: potential-corrected Gaussian heat bath.\n";
+    hila::out0 << "UPDATE ALGORITHM: Metropolis.\n";
 #endif
 
 #if MOMENTUMSPACE == 1
