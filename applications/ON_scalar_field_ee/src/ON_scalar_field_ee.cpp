@@ -379,11 +379,7 @@ void ON_heatbath_const_r(T &S, const T &nnsum, atype kappa, atype lambda, const 
         double f = (1.0 + x * z) / (x + z);
         double c = al * (x - f);
         if (c * (2.0 - c) - u2 > 0.0 || ::log(c / u2) + 1.0 - c >= 0.0) {
-            if (hila::random() < 0.5) {
-                ar0 = (atype)::acos(f);
-            } else {
-                ar0 = -(atype)::acos(f);
-            }
+            ar0 = (atype)f;
             break;
         }
     }
@@ -393,8 +389,7 @@ void ON_heatbath_const_r(T &S, const T &nnsum, atype kappa, atype lambda, const 
     double xd = 1.0 - xl;
     double xr = xl + xd * hila::random();
     ar0 = (atype)(1.0 + ::log((double)xr) / al);
-#else
-#if NCOLOR == 4
+#elif NCOLOR == 4
     const int LOOPLIM = 100;
     if (al > (atype)1.06) { /* k-p-like algorithm (modified: delsq-term from correction factor is
                               absorbed into gaussian) */
@@ -489,8 +484,6 @@ void ON_heatbath_const_r(T &S, const T &nnsum, atype kappa, atype lambda, const 
         S *= ::sqrt(1.0 - ar0 * ar0) * r / rs;
     }
     S += ar0 * r * kdir;
-#endif
-
 #endif
 }
 
